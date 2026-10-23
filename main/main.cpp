@@ -29,6 +29,8 @@
 #include "esp_hosted.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/stream_buffer.h"
+#include "freertos/semphr.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "nvs.h"
@@ -75,6 +77,8 @@ lv_obj_t *g_station_label = nullptr;
 lv_obj_t *g_status_label = nullptr;
 lv_obj_t *g_volume_label = nullptr;
 lv_obj_t *g_volume_bar = nullptr;
+lv_obj_t *g_buffer_bar = nullptr;
+std::atomic<int> g_buffer_percent{0};
 lv_obj_t *g_rates_label = nullptr;
 std::atomic<int> g_stream_kbps{0};
 std::atomic<int> g_download_kbps{0};
@@ -764,6 +768,74 @@ bool open_speaker(const esp_audio_simple_dec_info_t &info)
     return true;
 }
 
+// One producer (network/decoder), one consumer (speaker). PCM lives in PSRAM.
+struct AudioBuffer {
+    StreamBufferHandle_t stream = nullptr;
+    StaticStreamBuffer_t stream_state{};
+    StaticSemaphore_t done_state{};
+    SemaphoreHandle_t done = nullptr;
+    uint8_t *storage = nullptr;
+    size_t bytes_per_second = 0;
+    size_t frame_bytes = 0;
+    int station = 0;
+    std::atomic<bool> stop{false};
+    std::atomic<bool> error{false};
+    std::atomic<uint32_t> played_ms{0};
+    std::atomic<uint32_t> underruns{0};
+    std::atomic<TickType_t> last_output{0};
+};
+
+bool audio_cancelled(const AudioBuffer &buffer)
+{
+    return buffer.stop.load() || g_scan_requested.load() || g_sleep_requested.load() ||
+        !g_playback_requested.load() || g_station.load() != buffer.station;
+}
+
+void audio_output_task(void *argument)
+{
+    auto &buffer = *static_cast<AudioBuffer *>(argument);
+    uint8_t pcm[4096];
+    bool priming = true;
+    size_t threshold = buffer.bytes_per_second / 2; // Fast start: 0.5 seconds.
+    TickType_t last_log = xTaskGetTickCount();
+    while (!audio_cancelled(buffer)) {
+        const size_t available = xStreamBufferBytesAvailable(buffer.stream);
+        g_buffer_percent.store(static_cast<int>(available * 100 / (buffer.bytes_per_second * 10)));
+        if (xTaskGetTickCount() - last_log >= pdMS_TO_TICKS(5000)) {
+            ESP_LOGI(kTag, "Audio buffer: %u ms / 10000 ms, underruns: %lu",
+                static_cast<unsigned>(available * 1000 / buffer.bytes_per_second),
+                static_cast<unsigned long>(buffer.underruns.load()));
+            last_log = xTaskGetTickCount();
+        }
+        if (priming) {
+            if (available < threshold) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
+            priming = false;
+            set_status((std::string("Playing ") + kStations[buffer.station].name).c_str());
+        }
+        const size_t wanted = std::min(available, sizeof(pcm)) / buffer.frame_bytes * buffer.frame_bytes;
+        if (!wanted) {
+            ++buffer.underruns;
+            buffer.played_ms.store(0);
+            ESP_LOGW(kTag, "Audio underrun; refilling to 2 seconds");
+            set_status("Buffering audio...");
+            threshold = buffer.bytes_per_second * 2;
+            priming = true;
+            continue;
+        }
+        const size_t count = xStreamBufferReceive(buffer.stream, pcm, wanted, 0);
+        if (audio_cancelled(buffer)) break;
+        if (esp_codec_dev_write(g_speaker, pcm, count) != ESP_CODEC_DEV_OK) {
+            buffer.error.store(true);
+            break;
+        }
+        buffer.played_ms.fetch_add(static_cast<uint32_t>(count * 1000 / buffer.bytes_per_second));
+        buffer.last_output.store(xTaskGetTickCount());
+    }
+    g_buffer_percent.store(0);
+    xSemaphoreGive(buffer.done);
+    vTaskDelete(nullptr);
+}
+
 bool play_stream(const Station &station, int station_index)
 {
     g_stream_kbps.store(0);
@@ -797,17 +869,21 @@ bool play_stream(const Station &station, int station_index)
         return false;
     }
 
+    AudioBuffer audio;
+    audio.station = station_index;
+    bool output_task_started = false;
     bool audio_open = false;
     bool first_audio = true;
     bool failed = false;
     bool cached = cached_stream(station_index) == playlist_url;
-    uint64_t good_audio_us = 0;
     TickType_t last_audio_tick = xTaskGetTickCount();
     std::string last_segment;
     std::string media_url = playlist_url;
     int playlist_depth = 0;
     while (g_connected.load() && g_playback_requested.load() && !g_scan_requested.load() && !g_sleep_requested.load() && g_station.load() == station_index) {
-        if (xTaskGetTickCount() - last_audio_tick > pdMS_TO_TICKS(30000)) { failed = true; break; }
+        if (audio.error.load()) { failed = true; break; }
+        const TickType_t last_progress = output_task_started ? audio.last_output.load() : last_audio_tick;
+        if (xTaskGetTickCount() - last_progress > pdMS_TO_TICKS(30000)) { failed = true; break; }
         const std::string playlist = fetch_hls_playlist(media_url);
         std::array<std::string, kMaxHlsSegments> segments{};
         const size_t segment_count = parse_hls_segments(playlist, media_url, segments);
@@ -843,12 +919,14 @@ bool play_stream(const Station &station, int station_index)
             break;
         }
         if (!segment_count) {
-            good_audio_us = 0;
+            audio.played_ms.store(0);
             vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
 
-        size_t segment_index = segment_count - 1;
+        // Start one published segment behind the live edge so the producer can
+        // immediately fetch ahead instead of waiting for the next publication.
+        size_t segment_index = last_segment.empty() && segment_count > 1 ? segment_count - 2 : segment_count - 1;
         bool wait_for_next = false;
         if (!last_segment.empty()) {
             for (size_t i = 0; i < segment_count; ++i) {
@@ -866,7 +944,7 @@ bool play_stream(const Station &station, int station_index)
 
         size_t transport_size = 0;
         if (!download_hls_segment(segments[segment_index], transport_stream, kHlsSegmentMaxSize, transport_size)) {
-            good_audio_us = 0;
+            audio.played_ms.store(0);
             vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
@@ -909,26 +987,48 @@ bool play_stream(const Station &station, int station_index)
                         raw.len = 0;
                         break;
                     }
-                    audio_open = true;
-                    first_audio = false;
-                    ESP_LOGI(kTag, "Playing %s as AAC HLS", station.name);
-                    set_status((std::string("Playing ") + station.name).c_str());
-                }
-                if (audio_open) {
-                    if (esp_codec_dev_write(g_speaker, decoded.buffer, decoded.decoded_size) != ESP_CODEC_DEV_OK) {
+                    audio.frame_bytes = info.channel * (info.bits_per_sample / 8);
+                    audio.bytes_per_second = static_cast<size_t>(info.sample_rate) * audio.frame_bytes;
+                    if (!audio.frame_bytes || !audio.bytes_per_second || audio.bytes_per_second > 768000) {
                         failed = true;
                         break;
                     }
+                    const size_t capacity = audio.bytes_per_second * 10;
+                    audio.storage = static_cast<uint8_t *>(heap_caps_malloc(capacity + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+                    if (!audio.storage) { failed = true; break; }
+                    audio.stream = xStreamBufferCreateStatic(capacity + 1, 1, audio.storage, &audio.stream_state);
+                    audio.done = xSemaphoreCreateBinaryStatic(&audio.done_state);
+                    audio.last_output.store(xTaskGetTickCount());
+                    if (!audio.stream || !audio.done || xTaskCreate(audio_output_task, "audio_output", 6144, &audio, 6, nullptr) != pdPASS) {
+                        failed = true;
+                        break;
+                    }
+                    output_task_started = true;
+                    audio_open = true;
+                    first_audio = false;
+                    ESP_LOGI(kTag, "Playing %s as AAC HLS", station.name);
+                    set_status("Priming audio buffer...");
+                }
+                if (audio_open) {
+                    size_t sent = 0;
+                    while (sent < decoded.decoded_size && !audio_cancelled(audio) && !audio.error.load()) {
+                        sent += xStreamBufferSend(audio.stream, decoded.buffer + sent,
+                            decoded.decoded_size - sent, pdMS_TO_TICKS(20));
+                    }
+                    if (audio.error.load()) { failed = true; break; }
+                    if (audio_cancelled(audio)) break;
+                    // Pace decoding around the five-second watermark, leaving room for bursts.
+                    while (xStreamBufferBytesAvailable(audio.stream) > audio.bytes_per_second * 5 &&
+                           !audio_cancelled(audio) && !audio.error.load()) vTaskDelay(pdMS_TO_TICKS(20));
                     last_audio_tick = xTaskGetTickCount();
                     esp_audio_simple_dec_info_t info{};
                     if (esp_audio_simple_dec_get_info(decoder, &info) == ESP_AUDIO_ERR_OK &&
                         info.sample_rate && info.channel && info.bits_per_sample) {
                         const uint64_t duration = static_cast<uint64_t>(decoded.decoded_size) * 8000000ULL /
                             (static_cast<uint64_t>(info.sample_rate) * info.channel * info.bits_per_sample);
-                        good_audio_us += duration;
                         segment_audio_us += duration;
                     }
-                    if (!cached && good_audio_us >= 30000000ULL) {
+                    if (!cached && audio.played_ms.load() >= 30000 && !audio.error.load()) {
                         cache_stream(station_index, playlist_url);
                         cached = true;
                         ESP_LOGI(kTag, "Cached verified stream for %s", station.name);
@@ -947,7 +1047,13 @@ bool play_stream(const Station &station, int station_index)
             break;
         }
     }
-    if (audio_open && g_speaker) {
+    audio.stop.store(true);
+    if (output_task_started) xSemaphoreTake(audio.done, portMAX_DELAY);
+    if (audio.stream) vStreamBufferDelete(audio.stream);
+    if (audio.done) vSemaphoreDelete(audio.done);
+    heap_caps_free(audio.storage);
+    // open_speaker may have succeeded before a buffer/task allocation failed.
+    if (g_speaker && (audio_open || !first_audio || failed)) {
         esp_codec_dev_close(g_speaker);
     }
     esp_audio_simple_dec_close(decoder);
@@ -1079,6 +1185,11 @@ void refresh_ui(lv_timer_t *)
         const std::string text = status_copy();
         lv_label_set_text(g_status_label, text.c_str());
     }
+    if (g_buffer_bar) {
+        const int fill = g_buffer_percent.load();
+        lv_bar_set_value(g_buffer_bar, fill, LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(g_buffer_bar, lv_color_hex(fill < 10 ? 0xe5a458 : 0x60aaff), LV_PART_INDICATOR);
+    }
     if (g_volume_bar) lv_bar_set_value(g_volume_bar, g_volume.load(), LV_ANIM_OFF);
     if (g_rates_label) {
         char rates[100];
@@ -1135,6 +1246,14 @@ void build_ui()
     lv_obj_set_style_text_font(g_rates_label, &lv_font_montserrat_24, 0);
     lv_label_set_text(g_rates_label, "STREAM -- kbit/s | Wi-Fi RX -- kbit/s");
     lv_obj_align(g_rates_label, LV_ALIGN_TOP_MID, 0, 280);
+
+    g_buffer_bar = lv_bar_create(screen);
+    lv_obj_set_size(g_buffer_bar, 8, 620);
+    lv_obj_align(g_buffer_bar, LV_ALIGN_LEFT_MID, 6, 0);
+    lv_bar_set_range(g_buffer_bar, 0, 100);
+    lv_bar_set_value(g_buffer_bar, 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(g_buffer_bar, lv_color_hex(0x1b2638), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(g_buffer_bar, lv_color_hex(0x60aaff), LV_PART_INDICATOR);
 
     g_volume_bar = lv_bar_create(screen);
     lv_obj_set_size(g_volume_bar, 8, 620);

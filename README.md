@@ -88,3 +88,9 @@ To manually clear the entire NVS partition from an ESP-IDF terminal, close the s
 STOP turns off the backlight and enters deep sleep. The backlight GPIO is held in its inactive state during sleep. Press RESET or cycle power to wake this board.
 
 SCAN stops playback, clears all stream URLs in `streams96` and the in-memory candidate lists, then searches again for the selected station and resumes playback. Wi-Fi credentials, volume, and station selection are preserved. If offline, discovery waits for Wi-Fi. An active HTTP request may take up to its configured timeout before the playback task can clear the cache. Cache-clear failures are shown on screen and require another SCAN attempt.
+
+### Buffered playback
+
+Downloading/decoding and speaker output run in separate FreeRTOS tasks. A PSRAM PCM buffer holds ten seconds at the decoded format (about 1.92 MB for 48 kHz stereo, 16-bit). Playback starts at 0.5 seconds; decoding pauses above a five-second target. After an underrun the output waits for two seconds before resuming. Startup still requires downloading the first complete HLS segment. Playback begins one published segment behind the live edge when possible, allowing immediate prefetch at the cost of extra live latency.
+
+The thin left bar shows buffer occupancy from empty to ten seconds, with the five-second target at 50%; it turns amber below one second. The right bar remains volume. Buffer duration and underrun count are logged every five seconds. The output clock stays at the decoded nominal sample rate; automatic clock tuning/resampling is not implemented. STOP, SCAN, and station changes cancel output and discard buffered audio. Cache qualification counts successful speaker output and restarts after underruns.
