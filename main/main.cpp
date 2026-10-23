@@ -23,7 +23,6 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
-#include "esp_sleep.h"
 #include "esp_wifi.h"
 #include "esp_wifi_remote.h"
 #include "esp_hosted.h"
@@ -69,6 +68,8 @@ std::atomic<bool> g_internet_probe_pending{false};
 std::atomic<bool> g_portal_active{false};
 std::atomic<bool> g_playback_requested{true};
 std::atomic<bool> g_sleep_requested{false};
+std::atomic<bool> g_idle_ready{false};
+lv_obj_t *g_wake_overlay = nullptr;
 std::atomic<bool> g_scan_requested{false};
 std::atomic<int> g_station_retries{0};
 httpd_handle_t g_http_server = nullptr;
@@ -1074,21 +1075,14 @@ void playback_task(void *)
 {
     while (true) {
         if (g_sleep_requested.load()) {
-            if (g_speaker) {
-                esp_codec_dev_close(g_speaker);
-                bsp_audio_deinit();
-                g_speaker = nullptr;
-            }
-            if (g_connected.load()) esp_wifi_stop();
-            ESP_ERROR_CHECK(bsp_display_backlight_off());
-            // BSP uses inverted PWM: a high pad level keeps the backlight off.
-            ESP_ERROR_CHECK(gpio_reset_pin(BSP_LCD_BACKLIGHT));
-            ESP_ERROR_CHECK(gpio_set_direction(BSP_LCD_BACKLIGHT, GPIO_MODE_OUTPUT));
-            ESP_ERROR_CHECK(gpio_set_level(BSP_LCD_BACKLIGHT, 1));
-            ESP_ERROR_CHECK(gpio_hold_en(BSP_LCD_BACKLIGHT));
-            set_status("Sleeping; press RESET to wake");
-            vTaskDelay(pdMS_TO_TICKS(250));
-            esp_deep_sleep_start();
+            // Audio output has joined and released the codec. Keep LVGL, touch
+            // polling, Wi-Fi and the PWM peripheral powered for tap-to-resume.
+            g_stream_kbps.store(0);
+            g_download_kbps.store(0);
+            set_status("Stopped; tap the screen to resume");
+            g_idle_ready.store(true);
+            while (g_sleep_requested.load()) vTaskDelay(pdMS_TO_TICKS(50));
+            g_idle_ready.store(false);
         }
         if (g_scan_requested.exchange(false)) {
             // Playback has returned and released its decoder, speaker and HTTP clients.
@@ -1127,6 +1121,18 @@ void playback_task(void *)
     }
 }
 
+void wake_on_tap(lv_event_t *)
+{
+    if (!g_idle_ready.load()) return;
+    // The full-screen overlay consumes this tap, so it cannot activate a control.
+    if (g_wake_overlay) lv_obj_add_flag(g_wake_overlay, LV_OBJ_FLAG_HIDDEN);
+    const esp_err_t result = bsp_display_brightness_set(100);
+    if (result != ESP_OK) ESP_LOGE(kTag, "Backlight restore failed: %s", esp_err_to_name(result));
+    g_playback_requested.store(true);
+    g_sleep_requested.store(false);
+    set_status("Resuming radio...");
+}
+
 void radio_button(lv_event_t *event)
 {
     const intptr_t action = reinterpret_cast<intptr_t>(lv_event_get_user_data(event));
@@ -1156,7 +1162,12 @@ void radio_button(lv_event_t *event)
         set_status("Stopping stream for a fresh search");
         break;
     case 4:
-        bsp_display_backlight_off();
+        g_idle_ready.store(false);
+        if (g_wake_overlay) {
+            lv_obj_remove_flag(g_wake_overlay, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(g_wake_overlay);
+        }
+        if (bsp_display_backlight_off() != ESP_OK) ESP_LOGE(kTag, "Backlight off failed");
         g_playback_requested.store(false);
         g_sleep_requested.store(true);
         break;
@@ -1276,6 +1287,18 @@ void build_ui()
     lv_obj_align(g_volume_label, LV_ALIGN_TOP_MID, 0, 595);
     add_button(screen, "STOP", 100, 635, 220, 64, 4);
     add_button(screen, "SCAN", 400, 635, 220, 64, 5);
+
+    g_wake_overlay = lv_obj_create(screen);
+    lv_obj_set_size(g_wake_overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_pos(g_wake_overlay, 0, 0);
+    lv_obj_set_style_bg_color(g_wake_overlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(g_wake_overlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(g_wake_overlay, 0, 0);
+    lv_obj_set_style_radius(g_wake_overlay, 0, 0);
+    lv_obj_remove_flag(g_wake_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_wake_overlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(g_wake_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(g_wake_overlay, wake_on_tap, LV_EVENT_CLICKED, nullptr);
 
     lv_timer_create(refresh_ui, 500, nullptr);
     bsp_display_unlock();

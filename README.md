@@ -14,7 +14,7 @@ Display the station name.
 
 Add up and down buttons to change station an + and - buttons to change volume.
 
-A power button to turn the device off and on. When turned off, the device will go into deep sleep and wake up when the power button is pressed.
+A STOP button pauses audio and blanks the display while keeping Wi-Fi and touch active. Tap the screen to resume.
 
 ## Hardware specifications
 
@@ -39,7 +39,7 @@ The P4 does not contain a Wi-Fi radio. Wi-Fi and Bluetooth use the onboard ESP32
 
 At first boot, the radio opens the unsecured `p4Radio-Setup` Wi-Fi network. Join it from a phone; its captive portal scans nearby networks and saves the chosen SSID and password in NVS before connecting. After Wi-Fi comes up, p4Radio fetches the selected BBC HLS playlist, extracts AAC audio from its MPEG-TS segments, and sends decoded audio to the onboard ES8311 codec and speaker output. The five presets are BBC Radio 1, 2, 4, 4 Extra, and 5 Live; Radio 4 Extra fills the repeated BBC 4 entry in the original list. Station and volume selections are retained across restarts.
 
-The display has previous/next station, volume down/up, and a power control. Power enters ESP32-P4 deep sleep. The GT911 touch interrupt is not connected to an MCU GPIO on this board, so touch cannot wake the sleeping P4; press RESET or cycle board power to boot it again.
+The display has previous/next station, volume down/up, STOP, and SCAN controls. STOP uses an awake idle mode so touch polling and Wi-Fi remain active; tapping the dark screen resumes playback. This consumes more power than deep sleep. The GT911 interrupt is not connected to an MCU GPIO on this board, so deep sleep cannot provide touch wake.
 
 Wi-Fi provisioning and playback require a compatible ESP32-C6 ESP-Hosted slave image. The P4 host dependencies are pinned in [`main/idf_component.yml`](main/idf_component.yml). Waveshare's published examples do not include the C6 image, so a board with a missing or incompatible image cannot provide the setup AP until its C6 firmware is installed. The app reports that link failure on screen.
 
@@ -85,7 +85,7 @@ To manually clear the entire NVS partition from an ESP-IDF terminal, close the s
 
 ### STOP and SCAN
 
-STOP turns off the backlight and enters deep sleep. The backlight GPIO is held in its inactive state during sleep. Press RESET or cycle power to wake this board.
+STOP stops audio and turns off the PWM backlight while leaving LVGL/touch polling and Wi-Fi active. A full-screen black overlay consumes the wake tap, restores brightness, and resumes the station without deliberately disconnecting Wi-Fi. Wake becomes available once the playback task has finished its current HTTP operation and stopped the audio task. No deep sleep or GPIO hold is used; touch wake therefore works without a wired touch interrupt. This mode uses more power than deep sleep. The stream itself is reopened on resume, so some startup delay remains.
 
 SCAN stops playback, clears all stream URLs in `streams96` and the in-memory candidate lists, then searches again for the selected station and resumes playback. Wi-Fi credentials, volume, and station selection are preserved. If offline, discovery waits for Wi-Fi. An active HTTP request may take up to its configured timeout before the playback task can clear the cache. Cache-clear failures are shown on screen and require another SCAN attempt.
 
