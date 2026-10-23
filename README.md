@@ -47,13 +47,13 @@ Wi-Fi provisioning and playback require a compatible ESP32-C6 ESP-Hosted slave i
 
 ### Station discovery and stream cache
 
-On first selection, the firmware searches Radio Browser for the preset's exact name (case insensitive), trying two directory servers. It considers AAC HLS results and retains the original BBC URL as a fallback. The existing five station names remain the presets; this does not add a text search interface. Directory API: https://api.radio-browser.info/
+On first selection, the firmware searches Radio Browser for the preset's exact name (case insensitive), trying two directory servers. It considers AAC HLS results and retains a BBC worldwide 96 kbit/s URL as a fallback. The existing five station names remain the presets; this does not add a text search interface. Directory API: https://api.radio-browser.info/
 
-A stream is saved in the `streams` NVS namespace after 30 seconds of decoded PCM audio has been accepted by the speaker driver without a reported decode or output error. Playlist or segment download failures reset that qualification period. Saved URLs survive reboot and are tried before searching again. This is a software health check, not a measurement of audible quality.
+A stream is saved in the `streams96` NVS namespace after 30 seconds of decoded PCM audio has been accepted by the speaker driver without a reported decode or output error. Playlist or segment download failures reset that qualification period. Saved URLs survive reboot and are tried before searching again. This is a software health check, not a measurement of audible quality.
 
 Decode/output errors, unsupported segment formats, or 30 seconds without audio cause the player to try the next candidate. A failing cached URL is removed. After all candidates fail, the directory is searched again. Playback also retries after Wi-Fi reconnects. Search is performed when a station is selected, not as a background scan of every preset.
 
-The player supports unencrypted AAC in MPEG-TS HLS, including basic master playlists. MP3, direct continuous AAC, encrypted HLS, and fragmented MP4 are not supported and are not intentionally cached. Changing preset names/order in firmware should be accompanied by clearing the `streams` namespace, since cache keys identify preset slots.
+The player supports unencrypted AAC in MPEG-TS HLS, including basic master playlists. MP3, direct continuous AAC, encrypted HLS, and fragmented MP4 are not supported and are not intentionally cached. Changing preset names/order in firmware should be accompanied by clearing the `streams96` namespace, since cache keys identify preset slots.
 
 Use ESP-IDF 6.1 (or a compatible ESP-IDF release supported by the pinned components):
 
@@ -70,3 +70,21 @@ The first configure/build resolves the pinned components from the ESP Component 
 The project targets `esp32p4`. [`sdkconfig.defaults`](sdkconfig.defaults) selects the pre-v3 P4 silicon branch for this board's revision 1.3. ESP-IDF does not permit one binary to support both pre-v3 and v3-or-later P4 revisions, so this firmware configuration is for the reported rev 1.x board.
 
 Board specifications: [Waveshare ESP32-P4-WIFI6-Touch-LCD-4B / ETH-2RO documentation](https://docs.waveshare.com/ESP32-P4-WIFI6-Touch-LCD-4B). The 4B documentation covers the shared main board; the ETH-2RO SKU adds the Ethernet/RS485/relay bottom board and omits the camera connector.
+
+### Volume and stream rates
+
+Volume runs from 1 to 10 in single steps, with a thin vertical indicator at the right edge. Existing percentage preferences are converted on load. Button captions use the larger 40-pixel font.
+
+The display shows measured encoded AAC bitrate and recent segment download throughput (Wi-Fi RX), both in kbit/s. Download throughput includes connection setup and is not a measurement of maximum Wi-Fi capacity; stale measurements show `--` after 15 seconds. AAC bitrate is calculated after a complete decoded segment.
+
+Directory candidates and advertised HLS variants are ranked by distance from 96 kbit/s. Availability determines the actual bitrate; directory results can be higher. A new `streams96` cache namespace ensures old high-bitrate cache entries do not bypass the new selection preference.
+
+Fallback URLs were checked on 23 October 2026: all five worldwide BBC 96 kbit/s endpoints returned HLS playlists and MPEG-TS segment samples. This verifies HTTP availability and transport format, not audible content or uninterrupted playback. Cache policy revision 2 clears the `streams96` namespace once after installing this firmware, preserving Wi-Fi and radio preferences.
+
+To manually clear the entire NVS partition from an ESP-IDF terminal, close the serial monitor and run `python -m esptool --chip esp32p4 --port COM12 erase-region 0x9000 0x6000`. This partition address and length come from this project's `partitions.csv`. It removes saved Wi-Fi credentials, volume, station selection, and stream URLs; the next boot enters Wi-Fi setup. Normal flashing does not clear NVS.
+
+### STOP and SCAN
+
+STOP turns off the backlight and enters deep sleep. The backlight GPIO is held in its inactive state during sleep. Press RESET or cycle power to wake this board.
+
+SCAN stops playback, clears all stream URLs in `streams96` and the in-memory candidate lists, then searches again for the selected station and resumes playback. Wi-Fi credentials, volume, and station selection are preserved. If offline, discovery waits for Wi-Fi. An active HTTP request may take up to its configured timeout before the playback task can clear the cache. Cache-clear failures are shown on screen and require another SCAN attempt.

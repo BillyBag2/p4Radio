@@ -7,6 +7,8 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <map>
+#include "esp_timer.h"
 #include "cJSON.h"
 
 #include "bsp/esp32_p4_wifi6_touch_lcd_4b.h"
@@ -37,8 +39,8 @@ namespace {
 constexpr char kTag[] = "p4radio";
 constexpr char kApSsid[] = "p4Radio-Setup";
 constexpr int kStationCount = 5;
-constexpr int kMaxVolume = 100;
-constexpr int kMinVolume = 0;
+constexpr int kMaxVolume = 10;
+constexpr int kMinVolume = 1;
 constexpr int kDnsPort = 53;
 constexpr int kHttpPort = 80;
 constexpr size_t kHlsSegmentMaxSize = 512 * 1024;
@@ -51,26 +53,33 @@ struct Station {
 
 // BBC Radio 4 Extra occupies the repeated BBC4 slot in the original station list.
 constexpr std::array<Station, kStationCount> kStations{{
-    {"BBC Radio 1", "https://as-hls-uk-live.akamaized.net/pool_01505109/live/uk/bbc_radio_one/bbc_radio_one.isml/bbc_radio_one-audio=320000.norewind.m3u8"},
-    {"BBC Radio 2", "https://as-hls-uk-live.akamaized.net/pool_74208725/live/uk/bbc_radio_two/bbc_radio_two.isml/bbc_radio_two-audio=320000.norewind.m3u8"},
-    {"BBC Radio 4", "https://as-hls-uk-live.akamaized.net/pool_55057080/live/uk/bbc_radio_fourfm/bbc_radio_fourfm.isml/bbc_radio_fourfm-audio=320000.norewind.m3u8"},
-    {"BBC Radio 4 Extra", "https://as-hls-uk-live.akamaized.net/pool_26173715/live/uk/bbc_radio_four_extra/bbc_radio_four_extra.isml/bbc_radio_four_extra-audio=320000.norewind.m3u8"},
-    {"BBC Radio 5 Live", "https://as-hls-uk-live.akamaized.net/pool_89021708/live/uk/bbc_radio_five_live/bbc_radio_five_live.isml/bbc_radio_five_live-audio=320000.norewind.m3u8"},
+    {"BBC Radio 1", "https://as-hls-ww-live.akamaized.net/pool_01505109/live/ww/bbc_radio_one/bbc_radio_one.isml/bbc_radio_one-audio=96000.norewind.m3u8"},
+    {"BBC Radio 2", "https://as-hls-ww-live.akamaized.net/pool_74208725/live/ww/bbc_radio_two/bbc_radio_two.isml/bbc_radio_two-audio=96000.norewind.m3u8"},
+    {"BBC Radio 4", "https://as-hls-ww-live.akamaized.net/pool_55057080/live/ww/bbc_radio_fourfm/bbc_radio_fourfm.isml/bbc_radio_fourfm-audio=96000.norewind.m3u8"},
+    {"BBC Radio 4 Extra", "https://as-hls-ww-live.akamaized.net/pool_26173715/live/ww/bbc_radio_four_extra/bbc_radio_four_extra.isml/bbc_radio_four_extra-audio=96000.norewind.m3u8"},
+    {"BBC Radio 5 Live", "https://as-hls-ww-live.akamaized.net/pool_89021708/live/ww/bbc_radio_five_live/bbc_radio_five_live.isml/bbc_radio_five_live-audio=96000.norewind.m3u8"},
 }};
 
 std::atomic<int> g_station{0};
-std::atomic<int> g_volume{50};
+std::atomic<int> g_volume{5};
 std::atomic<bool> g_connected{false};
 std::atomic<bool> g_internet_probe_pending{false};
 std::atomic<bool> g_portal_active{false};
 std::atomic<bool> g_playback_requested{true};
 std::atomic<bool> g_sleep_requested{false};
+std::atomic<bool> g_scan_requested{false};
 std::atomic<int> g_station_retries{0};
 httpd_handle_t g_http_server = nullptr;
 esp_codec_dev_handle_t g_speaker = nullptr;
 lv_obj_t *g_station_label = nullptr;
 lv_obj_t *g_status_label = nullptr;
 lv_obj_t *g_volume_label = nullptr;
+lv_obj_t *g_volume_bar = nullptr;
+lv_obj_t *g_rates_label = nullptr;
+std::atomic<int> g_stream_kbps{0};
+std::atomic<int> g_download_kbps{0};
+std::atomic<int64_t> g_download_time{0};
+std::map<std::string, int> g_url_bitrates;
 portMUX_TYPE g_status_mux = portMUX_INITIALIZER_UNLOCKED;
 char g_status[96] = "Starting radio";
 char g_saved_ssid[33] = {};
@@ -101,7 +110,7 @@ void save_preferences()
         return;
     }
     nvs_set_i32(nvs, "station", g_station.load());
-    nvs_set_i32(nvs, "volume", g_volume.load());
+    nvs_set_i32(nvs, "volume10", g_volume.load());
     nvs_commit(nvs);
     nvs_close(nvs);
 }
@@ -116,7 +125,11 @@ void load_preferences()
     if (nvs_get_i32(nvs, "station", &value) == ESP_OK && value >= 0 && value < kStationCount) {
         g_station.store(value);
     }
-    if (nvs_get_i32(nvs, "volume", &value) == ESP_OK) {
+    if (nvs_get_i32(nvs, "volume10", &value) != ESP_OK) {
+        if (nvs_get_i32(nvs, "volume", &value) == ESP_OK) value = (value + 5) / 10;
+        else value = 5;
+    }
+    {
         g_volume.store(std::clamp<int>(value, kMinVolume, kMaxVolume));
     }
     size_t size = sizeof(g_saved_ssid);
@@ -449,7 +462,7 @@ std::array<size_t, kStationCount> g_candidate_index{};
 std::string cached_stream(int index)
 {
     nvs_handle_t handle;
-    if (nvs_open("streams", NVS_READONLY, &handle) != ESP_OK) return {};
+    if (nvs_open("streams96", NVS_READONLY, &handle) != ESP_OK) return {};
     size_t size = 0;
     std::string value;
     char key[16];
@@ -469,7 +482,7 @@ void cache_stream(int index, const std::string &url)
     char key[16];
     std::snprintf(key, sizeof(key), "station%d", index);
     nvs_handle_t handle;
-    if (nvs_open("streams", NVS_READWRITE, &handle) != ESP_OK) return;
+    if (nvs_open("streams96", NVS_READWRITE, &handle) != ESP_OK) return;
     esp_err_t result = url.empty() ? nvs_erase_key(handle, key) : nvs_set_str(handle, key, url.c_str());
     if (result == ESP_OK) result = nvs_commit(handle);
     if (result != ESP_OK && result != ESP_ERR_NVS_NOT_FOUND) ESP_LOGW(kTag, "Stream cache: %s", esp_err_to_name(result));
@@ -530,7 +543,7 @@ std::string resolve_station_url(const Station &station, int index)
     for (const char *host : {"de1.api.radio-browser.info", "nl1.api.radio-browser.info"}) {
         const std::string query = std::string("https://") + host +
             "/json/stations/search?name=" + encoded +
-            "&nameExact=true&hidebroken=true&limit=12&order=bitrate&reverse=false";
+            "&nameExact=true&hidebroken=true&limit=50&order=bitrate&reverse=false";
         int status = 0;
         esp_err_t error = ESP_OK;
         auto client = open_http_get(query, status, error);
@@ -550,12 +563,20 @@ std::string resolve_station_url(const Station &station, int index)
                     !cJSON_IsString(url)) continue;
                 const std::string candidate = url->valuestring;
                 if (candidate.size() <= 2047 && (candidate.rfind("https://", 0) == 0 || candidate.rfind("http://", 0) == 0) &&
-                    std::find(urls.begin(), urls.end(), candidate) == urls.end()) urls.push_back(candidate);
+                    std::find(urls.begin(), urls.end(), candidate) == urls.end()) {
+                    urls.push_back(candidate);
+                    const auto *rate = cJSON_GetObjectItemCaseSensitive(entry, "bitrate");
+                    g_url_bitrates[candidate] = cJSON_IsNumber(rate) ? rate->valueint : 0;
+                }
             }
         }
         cJSON_Delete(root);
         if (!urls.empty()) break;
     }
+    std::stable_sort(urls.begin(), urls.end(), [](const std::string &a, const std::string &b) {
+        const int ar = g_url_bitrates[a], br = g_url_bitrates[b];
+        return (ar > 0 ? std::abs(ar - 96) : 1000000) < (br > 0 ? std::abs(br - 96) : 1000000);
+    });
     if (std::find(urls.begin(), urls.end(), station.playlist_url) == urls.end()) urls.push_back(station.playlist_url);
     ESP_LOGI(kTag, "%s: trying %u stream candidates", station.name, static_cast<unsigned>(urls.size()));
     return urls.front();
@@ -613,6 +634,7 @@ size_t parse_hls_segments(const std::string &playlist, const std::string &playli
 
 bool download_hls_segment(const std::string &url, uint8_t *buffer, size_t capacity, size_t &size)
 {
+    const int64_t started = esp_timer_get_time();
     size = 0;
     int status_code = 0;
     esp_err_t error = ESP_OK;
@@ -637,6 +659,11 @@ bool download_hls_segment(const std::string &url, uint8_t *buffer, size_t capaci
     if (size == capacity) {
         ESP_LOGE(kTag, "HLS segment exceeded %u bytes", static_cast<unsigned>(capacity));
         size = 0;
+    }
+    const int64_t elapsed = esp_timer_get_time() - started;
+    if (size && elapsed > 0) {
+        g_download_kbps.store(static_cast<int>(static_cast<uint64_t>(size) * 8000 / elapsed));
+        g_download_time.store(esp_timer_get_time());
     }
     return size != 0;
 }
@@ -733,12 +760,14 @@ bool open_speaker(const esp_audio_simple_dec_info_t &info)
         ESP_LOGE(kTag, "ES8311 open failed for %lu Hz", static_cast<unsigned long>(info.sample_rate));
         return false;
     }
-    esp_codec_dev_set_out_vol(g_speaker, g_volume.load());
+    esp_codec_dev_set_out_vol(g_speaker, g_volume.load() * 10);
     return true;
 }
 
 bool play_stream(const Station &station, int station_index)
 {
+    g_stream_kbps.store(0);
+    g_download_kbps.store(0);
     set_status((std::string("Loading ") + station.name).c_str());
     const std::string playlist_url = resolve_station_url(station, station_index);
     esp_audio_dec_register_default();
@@ -777,14 +806,35 @@ bool play_stream(const Station &station, int station_index)
     std::string last_segment;
     std::string media_url = playlist_url;
     int playlist_depth = 0;
-    while (g_connected.load() && g_playback_requested.load() && g_station.load() == station_index) {
+    while (g_connected.load() && g_playback_requested.load() && !g_scan_requested.load() && !g_sleep_requested.load() && g_station.load() == station_index) {
         if (xTaskGetTickCount() - last_audio_tick > pdMS_TO_TICKS(30000)) { failed = true; break; }
         const std::string playlist = fetch_hls_playlist(media_url);
         std::array<std::string, kMaxHlsSegments> segments{};
         const size_t segment_count = parse_hls_segments(playlist, media_url, segments);
         if (playlist.find("#EXT-X-STREAM-INF:") != std::string::npos && segment_count) {
             if (++playlist_depth > 3) { failed = true; break; }
-            media_url = segments.front();
+            // Pick the advertised variant nearest 96 kbit/s rather than the first one.
+            size_t position = 0;
+            int best_distance = 2147483647;
+            std::string best = segments.front();
+            while ((position = playlist.find("#EXT-X-STREAM-INF:", position)) != std::string::npos) {
+                const size_t end = playlist.find('\n', position);
+                if (end == std::string::npos) break;
+                const std::string attributes = playlist.substr(position, end - position);
+                size_t rate_pos = attributes.find("AVERAGE-BANDWIDTH=");
+                size_t prefix = 18;
+                if (rate_pos == std::string::npos) { rate_pos = attributes.find("BANDWIDTH="); prefix = 10; }
+                const long rate = rate_pos == std::string::npos ? 0 : std::strtol(attributes.c_str() + rate_pos + prefix, nullptr, 10);
+                const size_t uri_end = playlist.find('\n', end + 1);
+                std::string uri = playlist.substr(end + 1, uri_end == std::string::npos ? uri_end : uri_end - end - 1);
+                if (!uri.empty() && uri.back() == '\r') uri.pop_back();
+                if (rate > 0 && rate < 100000000 && !uri.empty() && uri.front() != '#' && std::abs(rate - 96000L) < best_distance) {
+                    best_distance = static_cast<int>(std::abs(rate - 96000L));
+                    best = make_hls_segment_url(media_url, uri);
+                }
+                position = end + 1;
+            }
+            media_url = best;
             continue;
         }
         if (playlist.find("#EXT-X-KEY:") != std::string::npos || playlist.find("#EXT-X-MAP:") != std::string::npos) {
@@ -832,7 +882,8 @@ bool play_stream(const Station &station, int station_index)
         esp_audio_simple_dec_raw_t raw{};
         raw.buffer = aac_data;
         raw.len = aac_size;
-        while (raw.len) {
+        uint64_t segment_audio_us = 0;
+        while (raw.len && !g_scan_requested.load() && !g_sleep_requested.load() && g_station.load() == station_index) {
             esp_audio_simple_dec_out_t decoded{};
             decoded.buffer = output;
             decoded.len = output_size;
@@ -872,8 +923,10 @@ bool play_stream(const Station &station, int station_index)
                     esp_audio_simple_dec_info_t info{};
                     if (esp_audio_simple_dec_get_info(decoder, &info) == ESP_AUDIO_ERR_OK &&
                         info.sample_rate && info.channel && info.bits_per_sample) {
-                        good_audio_us += static_cast<uint64_t>(decoded.decoded_size) * 8000000ULL /
+                        const uint64_t duration = static_cast<uint64_t>(decoded.decoded_size) * 8000000ULL /
                             (static_cast<uint64_t>(info.sample_rate) * info.channel * info.bits_per_sample);
+                        good_audio_us += duration;
+                        segment_audio_us += duration;
                     }
                     if (!cached && good_audio_us >= 30000000ULL) {
                         cache_stream(station_index, playlist_url);
@@ -887,6 +940,7 @@ bool play_stream(const Station &station, int station_index)
             raw.buffer += raw.consumed;
             raw.consumed = 0;
         }
+        if (!failed && segment_audio_us) g_stream_kbps.store(static_cast<int>(static_cast<uint64_t>(aac_size) * 8000 / segment_audio_us));
         if (failed) break;
         if (!first_audio && !audio_open) {
             set_status("AAC audio output could not start");
@@ -920,10 +974,39 @@ void playback_task(void *)
                 g_speaker = nullptr;
             }
             if (g_connected.load()) esp_wifi_stop();
-            bsp_display_backlight_off();
+            ESP_ERROR_CHECK(bsp_display_backlight_off());
+            // BSP uses inverted PWM: a high pad level keeps the backlight off.
+            ESP_ERROR_CHECK(gpio_reset_pin(BSP_LCD_BACKLIGHT));
+            ESP_ERROR_CHECK(gpio_set_direction(BSP_LCD_BACKLIGHT, GPIO_MODE_OUTPUT));
+            ESP_ERROR_CHECK(gpio_set_level(BSP_LCD_BACKLIGHT, 1));
+            ESP_ERROR_CHECK(gpio_hold_en(BSP_LCD_BACKLIGHT));
             set_status("Sleeping; press RESET to wake");
             vTaskDelay(pdMS_TO_TICKS(250));
             esp_deep_sleep_start();
+        }
+        if (g_scan_requested.exchange(false)) {
+            // Playback has returned and released its decoder, speaker and HTTP clients.
+            nvs_handle_t cache;
+            esp_err_t result = nvs_open("streams96", NVS_READWRITE, &cache);
+            if (result == ESP_OK) {
+                result = nvs_erase_all(cache);
+                if (result == ESP_OK) result = nvs_set_u32(cache, "revision", 2);
+                if (result == ESP_OK) result = nvs_commit(cache);
+                nvs_close(cache);
+            }
+            for (auto &candidates : g_candidates) candidates.clear();
+            g_candidate_index.fill(0);
+            g_url_bitrates.clear();
+            g_stream_kbps.store(0);
+            g_download_kbps.store(0);
+            if (result != ESP_OK) {
+                ESP_LOGE(kTag, "Stream cache clear failed: %s", esp_err_to_name(result));
+                set_status("Cache clear failed; press SCAN to retry");
+                g_playback_requested.store(false);
+            } else {
+                set_status("Cache cleared; searching for a stream");
+                g_playback_requested.store(true);
+            }
         }
         if (!g_connected.load() || !g_playback_requested.load()) {
             vTaskDelay(pdMS_TO_TICKS(250));
@@ -953,16 +1036,21 @@ void radio_button(lv_event_t *event)
         save_preferences();
         break;
     case 2:
-        g_volume.store(std::max(kMinVolume, g_volume.load() - 5));
+        g_volume.store(std::max(kMinVolume, g_volume.load() - 1));
         save_preferences();
-        if (g_speaker) esp_codec_dev_set_out_vol(g_speaker, g_volume.load());
+        if (g_speaker) esp_codec_dev_set_out_vol(g_speaker, g_volume.load() * 10);
         break;
     case 3:
-        g_volume.store(std::min(kMaxVolume, g_volume.load() + 5));
+        g_volume.store(std::min(kMaxVolume, g_volume.load() + 1));
         save_preferences();
-        if (g_speaker) esp_codec_dev_set_out_vol(g_speaker, g_volume.load());
+        if (g_speaker) esp_codec_dev_set_out_vol(g_speaker, g_volume.load() * 10);
+        break;
+    case 5:
+        g_scan_requested.store(true);
+        set_status("Stopping stream for a fresh search");
         break;
     case 4:
+        bsp_display_backlight_off();
         g_playback_requested.store(false);
         g_sleep_requested.store(true);
         break;
@@ -978,6 +1066,7 @@ lv_obj_t *add_button(lv_obj_t *parent, const char *caption, int x, int y, int wi
     lv_obj_set_style_radius(button, 18, 0);
     lv_obj_add_event_cb(button, radio_button, LV_EVENT_CLICKED, reinterpret_cast<void *>(action));
     lv_obj_t *label = lv_label_create(button);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_40, 0);
     lv_label_set_text(label, caption);
     lv_obj_center(label);
     return button;
@@ -990,9 +1079,20 @@ void refresh_ui(lv_timer_t *)
         const std::string text = status_copy();
         lv_label_set_text(g_status_label, text.c_str());
     }
+    if (g_volume_bar) lv_bar_set_value(g_volume_bar, g_volume.load(), LV_ANIM_OFF);
+    if (g_rates_label) {
+        char rates[100];
+        const int stream = g_stream_kbps.load();
+        const int wifi = g_connected.load() && esp_timer_get_time() - g_download_time.load() < 15000000 ? g_download_kbps.load() : 0;
+        char a[16], b[16];
+        if (stream > 0) std::snprintf(a, sizeof(a), "%d", stream); else std::snprintf(a, sizeof(a), "--");
+        if (wifi > 0) std::snprintf(b, sizeof(b), "%d", wifi); else std::snprintf(b, sizeof(b), "--");
+        std::snprintf(rates, sizeof(rates), "STREAM %s kbit/s | Wi-Fi RX %s kbit/s", a, b);
+        lv_label_set_text(g_rates_label, rates);
+    }
     if (g_volume_label) {
         char volume[24];
-        std::snprintf(volume, sizeof(volume), "VOLUME  %d%%", g_volume.load());
+        std::snprintf(volume, sizeof(volume), "VOLUME  %d / 10", g_volume.load());
         lv_label_set_text(g_volume_label, volume);
     }
 }
@@ -1031,18 +1131,32 @@ void build_ui()
     lv_obj_set_style_text_align(g_status_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(g_status_label, LV_ALIGN_TOP_MID, 0, 230);
 
+    g_rates_label = lv_label_create(screen);
+    lv_obj_set_style_text_font(g_rates_label, &lv_font_montserrat_24, 0);
+    lv_label_set_text(g_rates_label, "STREAM -- kbit/s | Wi-Fi RX -- kbit/s");
+    lv_obj_align(g_rates_label, LV_ALIGN_TOP_MID, 0, 280);
+
+    g_volume_bar = lv_bar_create(screen);
+    lv_obj_set_size(g_volume_bar, 8, 620);
+    lv_obj_align(g_volume_bar, LV_ALIGN_RIGHT_MID, -6, 0);
+    lv_bar_set_range(g_volume_bar, 0, 10);
+    lv_bar_set_value(g_volume_bar, g_volume.load(), LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(g_volume_bar, lv_color_hex(0x1b2638), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(g_volume_bar, lv_color_hex(0x60d6ad), LV_PART_INDICATOR);
+
     add_button(screen, "PREV", 100, 330, 200, 110, 0);
     add_button(screen, "NEXT", 420, 330, 200, 110, 1);
-    add_button(screen, "VOL -", 140, 485, 140, 95, 2);
-    add_button(screen, "VOL +", 440, 485, 140, 95, 3);
+    add_button(screen, "VOL -", 100, 485, 200, 95, 2);
+    add_button(screen, "VOL +", 420, 485, 200, 95, 3);
 
     g_volume_label = lv_label_create(screen);
     char volume[24];
-    std::snprintf(volume, sizeof(volume), "VOLUME  %d%%", g_volume.load());
+    std::snprintf(volume, sizeof(volume), "VOLUME  %d / 10", g_volume.load());
     lv_label_set_text(g_volume_label, volume);
     lv_obj_set_style_text_color(g_volume_label, lv_color_hex(0xa9b8ca), 0);
     lv_obj_align(g_volume_label, LV_ALIGN_TOP_MID, 0, 595);
-    add_button(screen, "POWER", 250, 635, 220, 64, 4);
+    add_button(screen, "STOP", 100, 635, 220, 64, 4);
+    add_button(screen, "SCAN", 400, 635, 220, 64, 5);
 
     lv_timer_create(refresh_ui, 500, nullptr);
     bsp_display_unlock();
@@ -1066,7 +1180,20 @@ extern "C" void app_main(void)
         nvs_result = nvs_flash_init();
     }
     ESP_ERROR_CHECK(nvs_result);
+    // Invalidate older high-bitrate stream URLs once, preserving radio/Wi-Fi preferences.
+    nvs_handle_t cache;
+    if (nvs_open("streams96", NVS_READWRITE, &cache) == ESP_OK) {
+        uint32_t revision = 0;
+        if (nvs_get_u32(cache, "revision", &revision) != ESP_OK || revision != 2) {
+            esp_err_t result = nvs_erase_all(cache);
+            if (result == ESP_OK) result = nvs_set_u32(cache, "revision", 2);
+            if (result == ESP_OK) result = nvs_commit(cache);
+            ESP_LOGI(kTag, "Stream cache reset: %s", esp_err_to_name(result));
+        }
+        nvs_close(cache);
+    }
     load_preferences();
+    gpio_hold_dis(BSP_LCD_BACKLIGHT);
     build_ui();
     initialize_audio();
     const bool network_ready = ensure_network_stack();
