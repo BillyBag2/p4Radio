@@ -45,6 +45,16 @@ Wi-Fi provisioning and playback require a compatible ESP32-C6 ESP-Hosted slave i
 
 ## Build
 
+### Station discovery and stream cache
+
+On first selection, the firmware searches Radio Browser for the preset's exact name (case insensitive), trying two directory servers. It considers AAC HLS results and retains the original BBC URL as a fallback. The existing five station names remain the presets; this does not add a text search interface. Directory API: https://api.radio-browser.info/
+
+A stream is saved in the `streams` NVS namespace after 30 seconds of decoded PCM audio has been accepted by the speaker driver without a reported decode or output error. Playlist or segment download failures reset that qualification period. Saved URLs survive reboot and are tried before searching again. This is a software health check, not a measurement of audible quality.
+
+Decode/output errors, unsupported segment formats, or 30 seconds without audio cause the player to try the next candidate. A failing cached URL is removed. After all candidates fail, the directory is searched again. Playback also retries after Wi-Fi reconnects. Search is performed when a station is selected, not as a background scan of every preset.
+
+The player supports unencrypted AAC in MPEG-TS HLS, including basic master playlists. MP3, direct continuous AAC, encrypted HLS, and fragmented MP4 are not supported and are not intentionally cached. Changing preset names/order in firmware should be accompanied by clearing the `streams` namespace, since cache keys identify preset slots.
+
 Use ESP-IDF 6.1 (or a compatible ESP-IDF release supported by the pinned components):
 
 ```sh
