@@ -30,9 +30,8 @@
 #include "freertos/task.h"
 #include "freertos/stream_buffer.h"
 #include "freertos/semphr.h"
-#include "lwip/inet.h"
-#include "lwip/sockets.h"
 #include "nvs.h"
+#include "mdns.h"
 #include "nvs_flash.h"
 
 namespace {
@@ -42,7 +41,6 @@ constexpr char kApSsid[] = "p4Radio-Setup";
 constexpr int kStationCount = 5;
 constexpr int kMaxVolume = 10;
 constexpr int kMinVolume = 1;
-constexpr int kDnsPort = 53;
 constexpr int kHttpPort = 80;
 constexpr size_t kHlsSegmentMaxSize = 512 * 1024;
 constexpr size_t kMaxHlsSegments = 24;
@@ -66,15 +64,28 @@ std::atomic<int> g_volume{5};
 std::atomic<bool> g_connected{false};
 std::atomic<bool> g_internet_probe_pending{false};
 std::atomic<bool> g_portal_active{false};
+std::atomic<bool> g_setup_submitted{false};
 std::atomic<bool> g_playback_requested{true};
 std::atomic<bool> g_sleep_requested{false};
 std::atomic<bool> g_idle_ready{false};
 lv_obj_t *g_wake_overlay = nullptr;
 std::atomic<bool> g_scan_requested{false};
 std::atomic<int> g_station_retries{0};
+std::atomic<int64_t> g_join_deadline_us{0};
+std::atomic<bool> g_join_allowed{true};
+constexpr int64_t kJoinTimeoutUs = 30000000; // Includes association and DHCP.
 httpd_handle_t g_http_server = nullptr;
 esp_codec_dev_handle_t g_speaker = nullptr;
 lv_obj_t *g_station_label = nullptr;
+lv_obj_t *g_hostname_label = nullptr;
+lv_obj_t *g_setup_screen = nullptr;
+lv_obj_t *g_setup_qr = nullptr;
+lv_obj_t *g_setup_url = nullptr;
+lv_obj_t *g_setup_title = nullptr;
+std::atomic<int> g_ap_clients{0};
+char g_hostname[33] = "p4radio";
+esp_netif_t *g_sta_netif = nullptr;
+esp_netif_t *g_ap_netif = nullptr;
 lv_obj_t *g_status_label = nullptr;
 lv_obj_t *g_volume_bar = nullptr;
 std::atomic<int> g_buffer_percent{0};
@@ -106,6 +117,31 @@ std::string status_copy()
     return copy;
 }
 
+std::string hostname_copy()
+{
+    char name[sizeof(g_hostname)];
+    portENTER_CRITICAL(&g_status_mux);
+    std::memcpy(name, g_hostname, sizeof(name));
+    portEXIT_CRITICAL(&g_status_mux);
+    return name;
+}
+
+bool valid_hostname(const std::string &name)
+{
+    if (name.empty() || name.size() > 32 || name.front() == '-' || name.back() == '-') return false;
+    for (unsigned char ch : name) if (!(ch >= 'a' && ch <= 'z') && !(ch >= '0' && ch <= '9') && ch != '-') return false;
+    return true;
+}
+
+void apply_hostname()
+{
+    const std::string name = hostname_copy();
+    if (g_sta_netif) esp_netif_set_hostname(g_sta_netif, name.c_str());
+    if (g_ap_netif) esp_netif_set_hostname(g_ap_netif, name.c_str());
+    const esp_err_t result = mdns_hostname_set(name.c_str());
+    if (result != ESP_OK) ESP_LOGW(kTag, "mDNS hostname: %s", esp_err_to_name(result));
+}
+
 void save_preferences()
 {
     nvs_handle_t nvs;
@@ -135,6 +171,10 @@ void load_preferences()
     {
         g_volume.store(std::clamp<int>(value, kMinVolume, kMaxVolume));
     }
+    size_t name_size = sizeof(g_hostname);
+    char name[sizeof(g_hostname)] = {};
+    if (nvs_get_str(nvs, "hostname", name, &name_size) == ESP_OK && valid_hostname(name))
+        std::snprintf(g_hostname, sizeof(g_hostname), "%s", name);
     size_t size = sizeof(g_saved_ssid);
     nvs_get_str(nvs, "ssid", g_saved_ssid, &size);
     size = sizeof(g_saved_password);
@@ -190,67 +230,17 @@ std::string form_value(const std::string &body, const char *wanted)
     return {};
 }
 
-void dns_task(void *)
-{
-    const int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (fd < 0) {
-        vTaskDelete(nullptr);
-        return;
-    }
-    timeval timeout{1, 0};
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    sockaddr_in local{};
-    local.sin_family = AF_INET;
-    local.sin_port = htons(kDnsPort);
-    local.sin_addr.s_addr = htonl(INADDR_ANY);
-    if (bind(fd, reinterpret_cast<sockaddr *>(&local), sizeof(local)) != 0) {
-        close(fd);
-        vTaskDelete(nullptr);
-        return;
-    }
-
-    uint8_t packet[512];
-    while (true) {
-        sockaddr_in peer{};
-        socklen_t peer_len = sizeof(peer);
-        const int length = recvfrom(fd, packet, sizeof(packet), 0, reinterpret_cast<sockaddr *>(&peer), &peer_len);
-        if (length < 17 || length > 490 || !g_portal_active.load()) {
-            continue;
-        }
-        // Answer every DNS A query with the captive portal address.
-        packet[2] = 0x81;
-        packet[3] = 0x80;
-        packet[6] = 0;
-        packet[7] = 1;
-        packet[8] = packet[9] = packet[10] = packet[11] = 0;
-        size_t offset = static_cast<size_t>(length);
-        packet[offset++] = 0xC0;
-        packet[offset++] = 0x0C;
-        packet[offset++] = 0;
-        packet[offset++] = 1;
-        packet[offset++] = 0;
-        packet[offset++] = 1;
-        packet[offset++] = 0;
-        packet[offset++] = 0;
-        packet[offset++] = 0;
-        packet[offset++] = 30;
-        packet[offset++] = 0;
-        packet[offset++] = 4;
-        packet[offset++] = 192;
-        packet[offset++] = 168;
-        packet[offset++] = 4;
-        packet[offset++] = 1;
-        sendto(fd, packet, offset, 0, reinterpret_cast<sockaddr *>(&peer), peer_len);
-    }
-}
-
 esp_err_t portal_page(httpd_req_t *request)
 {
+    ESP_LOGI(kTag, "Setup page requested: %s", request->uri);
     static constexpr char page[] = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>p4Radio Wi-Fi setup</title><style>
-body{font:17px system-ui;background:#101827;color:#f3f6fb;margin:0;padding:24px}main{max-width:480px;margin:auto;background:#1b2638;padding:24px;border-radius:18px}h1{margin-top:0}label{display:block;margin:16px 0 6px}input,select,button{box-sizing:border-box;width:100%;padding:13px;border:0;border-radius:9px;font:inherit}button{background:#60d6ad;font-weight:700;margin-top:18px}small{color:#a8b7ca}</style></head><body><main><h1>Connect p4Radio</h1><p>Choose your Wi-Fi network and enter its password. Your details stay on this radio.</p><form method="post" action="/connect"><label for="ssid">Wi-Fi network</label><select id="networks" onchange="document.getElementById('ssid').value=this.value"><option value="">Scanning…</option></select><input id="ssid" name="ssid" maxlength="32" placeholder="Network name" required><label for="password">Password</label><input id="password" name="password" type="password" maxlength="64" autocomplete="current-password"><button>Save and connect</button></form><p><small>If the list is empty, type the network name. This open setup network does not provide internet.</small></p></main><script>fetch('/api/scan').then(r=>r.json()).then(a=>{let s=document.getElementById('networks');s.innerHTML='<option value="">Select a network…</option>';a.forEach(n=>{let o=document.createElement('option');o.value=n;o.textContent=n;s.appendChild(o)})}).catch(()=>{});</script></body></html>)HTML";
+body{font:17px system-ui;background:#101827;color:#f3f6fb;margin:0;padding:24px}main{max-width:480px;margin:auto;background:#1b2638;padding:24px;border-radius:18px}h1{margin-top:0}label{display:block;margin:16px 0 6px}input,select,button{box-sizing:border-box;width:100%;padding:13px;border:0;border-radius:9px;font:inherit}button{background:#60d6ad;font-weight:700;margin-top:18px}small{color:#a8b7ca}</style></head><body><main><h1>Connect p4Radio</h1><p>Choose your Wi-Fi network and enter its password. Your details stay on this radio.</p><form method="post" action="/connect"><label for="hostname">Host name</label><input id="hostname" name="hostname" maxlength="32" pattern="[a-z0-9]+([a-z0-9-]*[a-z0-9])?" value="HOSTNAME_VALUE" required><small>Open http://&lt;hostname&gt;.local/ on your network.</small><label for="ssid">Wi-Fi network</label><select id="networks" onchange="document.getElementById('ssid').value=this.value"><option value="">Scanning…</option></select><input id="ssid" name="ssid" maxlength="32" placeholder="Network name" required><label for="password">Password</label><input id="password" name="password" type="password" maxlength="64" autocomplete="current-password"><button>Save and connect</button></form><p><small>If the list is empty, type the network name. This open setup network does not provide internet.</small></p></main><script>fetch('/api/scan').then(r=>r.json()).then(a=>{let s=document.getElementById('networks');s.innerHTML='<option value="">Select a network…</option>';a.forEach(n=>{let o=document.createElement('option');o.value=n;o.textContent=n;s.appendChild(o)})}).catch(()=>{});</script></body></html>)HTML";
     httpd_resp_set_type(request, "text/html; charset=utf-8");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
-    return httpd_resp_send(request, page, HTTPD_RESP_USE_STRLEN);
+    std::string rendered = page;
+    const size_t marker = rendered.find("HOSTNAME_VALUE");
+    if (marker != std::string::npos) rendered.replace(marker, std::strlen("HOSTNAME_VALUE"), hostname_copy());
+    return httpd_resp_send(request, rendered.c_str(), rendered.size());
 }
 
 esp_err_t scan_networks(httpd_req_t *request)
@@ -293,6 +283,11 @@ esp_err_t scan_networks(httpd_req_t *request)
 
 void configure_station(const char *ssid, const char *password)
 {
+    // Stop the previous join before replacing credentials, without retrying its
+    // disconnect event. The deadline also covers a connect RPC that reports failure.
+    g_join_allowed.store(false);
+    g_join_deadline_us.store(0);
+    esp_wifi_disconnect();
     wifi_config_t config{};
     std::snprintf(reinterpret_cast<char *>(config.sta.ssid), sizeof(config.sta.ssid), "%s", ssid);
     std::snprintf(reinterpret_cast<char *>(config.sta.password), sizeof(config.sta.password), "%s", password);
@@ -301,13 +296,16 @@ void configure_station(const char *ssid, const char *password)
     g_connected.store(false);
     g_station_retries.store(0);
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    esp_wifi_connect();
+    g_join_deadline_us.store(esp_timer_get_time() + kJoinTimeoutUs);
+    g_join_allowed.store(true);
+    const esp_err_t error = esp_wifi_connect();
+    if (error != ESP_OK) ESP_LOGW(kTag, "Wi-Fi join request: %s", esp_err_to_name(error));
     set_status("Connecting to Wi-Fi…");
 }
 
 esp_err_t connect_network(httpd_req_t *request)
 {
-    if (request->content_len <= 0 || request->content_len > 256) {
+    if (request->content_len <= 0 || request->content_len > 512) {
         return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Invalid form");
     }
     std::string body(static_cast<size_t>(request->content_len), '\0');
@@ -324,7 +322,23 @@ esp_err_t connect_network(httpd_req_t *request)
     if (ssid.empty() || ssid.size() > 32 || password.size() > 64) {
         return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Invalid network name or password");
     }
+    std::string hostname = form_value(body, "hostname");
+    std::transform(hostname.begin(), hostname.end(), hostname.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (!valid_hostname(hostname)) return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Host name must be 1-32 letters, digits or internal hyphens");
+    nvs_handle_t handle;
+    esp_err_t saved = nvs_open("p4radio", NVS_READWRITE, &handle);
+    if (saved == ESP_OK) {
+        saved = nvs_set_str(handle, "hostname", hostname.c_str());
+        if (saved == ESP_OK) saved = nvs_commit(handle);
+        nvs_close(handle);
+    }
+    if (saved != ESP_OK) return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "Could not save hostname");
+    portENTER_CRITICAL(&g_status_mux);
+    std::snprintf(g_hostname, sizeof(g_hostname), "%s", hostname.c_str());
+    portEXIT_CRITICAL(&g_status_mux);
+    apply_hostname();
     save_wifi_credentials(ssid.c_str(), password.c_str());
+    g_setup_submitted.store(true);
     httpd_resp_set_type(request, "text/html; charset=utf-8");
     static constexpr char response[] = "<!doctype html><meta name=viewport content='width=device-width'><h2>Connecting…</h2><p>Keep p4Radio powered on. The setup network will close after it joins Wi-Fi.</p>";
     const esp_err_t result = httpd_resp_send(request, response, HTTPD_RESP_USE_STRLEN);
@@ -332,11 +346,23 @@ esp_err_t connect_network(httpd_req_t *request)
     return result;
 }
 
-esp_err_t captive_redirect(httpd_req_t *request)
+void start_setup_http()
 {
-    httpd_resp_set_status(request, "302 Found");
-    httpd_resp_set_hdr(request, "Location", "http://192.168.4.1/");
-    return httpd_resp_send(request, nullptr, 0);
+    if (g_http_server) return;
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.server_port = kHttpPort;
+    config.stack_size = 6144;
+    // Phone probes and browser connections must not exhaust the small socket pool.
+    config.lru_purge_enable = true;
+    config.recv_wait_timeout = 5;
+    config.send_wait_timeout = 5;
+    ESP_ERROR_CHECK(httpd_start(&g_http_server, &config));
+    const httpd_uri_t root{.uri = "/", .method = HTTP_GET, .handler = portal_page, .user_ctx = nullptr};
+    const httpd_uri_t scan{.uri = "/api/scan", .method = HTTP_GET, .handler = scan_networks, .user_ctx = nullptr};
+    const httpd_uri_t connect{.uri = "/connect", .method = HTTP_POST, .handler = connect_network, .user_ctx = nullptr};
+    ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &root));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &scan));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &connect));
 }
 
 void start_portal()
@@ -344,6 +370,7 @@ void start_portal()
     if (g_portal_active.exchange(true)) {
         return;
     }
+    g_setup_submitted.store(false);
     wifi_config_t ap{};
     std::snprintf(reinterpret_cast<char *>(ap.ap.ssid), sizeof(ap.ap.ssid), "%s", kApSsid);
     ap.ap.ssid_len = std::strlen(kApSsid);
@@ -361,50 +388,48 @@ void start_portal()
         return;
     }
 
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.server_port = kHttpPort;
-    config.uri_match_fn = httpd_uri_match_wildcard;
-    config.stack_size = 6144;
-    ESP_ERROR_CHECK(httpd_start(&g_http_server, &config));
-    const httpd_uri_t root{.uri = "/", .method = HTTP_GET, .handler = portal_page, .user_ctx = nullptr};
-    const httpd_uri_t scan{.uri = "/api/scan", .method = HTTP_GET, .handler = scan_networks, .user_ctx = nullptr};
-    const httpd_uri_t connect{.uri = "/connect", .method = HTTP_POST, .handler = connect_network, .user_ctx = nullptr};
-    const httpd_uri_t redirect{.uri = "/*", .method = HTTP_GET, .handler = captive_redirect, .user_ctx = nullptr};
-    ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &root));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &scan));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &connect));
-    ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &redirect));
-    xTaskCreate(dns_task, "captive_dns", 3072, nullptr, 3, nullptr);
+    start_setup_http();
     set_status("Setup Wi-Fi: join p4Radio-Setup");
 }
 
 void stop_portal()
 {
     g_portal_active.store(false);
-    if (g_http_server) {
-        httpd_stop(g_http_server);
-        g_http_server = nullptr;
-    }
+    g_ap_clients.store(0);
     esp_wifi_set_mode(WIFI_MODE_STA);
 }
 
 void wifi_event_handler(void *, esp_event_base_t base, int32_t id, void *)
 {
-    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        if (g_saved_ssid[0]) {
+    if (base == WIFI_EVENT && (id == WIFI_EVENT_AP_STACONNECTED || id == WIFI_EVENT_AP_STADISCONNECTED)) {
+        wifi_sta_list_t clients{};
+        if (esp_wifi_ap_get_sta_list(&clients) == ESP_OK) g_ap_clients.store(clients.num);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+        if (g_saved_ssid[0] && g_join_allowed.load()) {
+            g_join_deadline_us.store(esp_timer_get_time() + kJoinTimeoutUs);
             esp_wifi_connect();
         }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         g_connected.store(false);
+        if (!g_join_allowed.load()) return;
+        if (g_join_deadline_us.load() == 0) g_join_deadline_us.store(esp_timer_get_time() + kJoinTimeoutUs);
         if (g_saved_ssid[0] && g_station_retries.fetch_add(1) < 5) {
             vTaskDelay(pdMS_TO_TICKS(400));
             esp_wifi_connect();
         } else if (!g_portal_active.load()) {
+            g_join_allowed.store(false);
+            g_join_deadline_us.store(0);
             start_portal();
         } else {
+            g_join_allowed.store(false);
+            g_join_deadline_us.store(0);
+            g_setup_submitted.store(false);
             set_status("Wi-Fi join failed; retry in setup page");
         }
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        if (!g_join_allowed.load()) { esp_wifi_disconnect(); return; }
+        g_join_deadline_us.store(0);
+        g_setup_submitted.store(false);
         g_connected.store(true);
         g_internet_probe_pending.store(true);
         g_station_retries.store(0);
@@ -414,6 +439,23 @@ void wifi_event_handler(void *, esp_event_base_t base, int32_t id, void *)
         char message[96];
         std::snprintf(message, sizeof(message), "Connected to %.30s", g_saved_ssid);
         set_status(message);
+    }
+}
+
+void wifi_join_watchdog(void *)
+{
+    while (true) {
+        int64_t deadline = g_join_deadline_us.load();
+        if (deadline != 0 && esp_timer_get_time() >= deadline &&
+            g_join_deadline_us.compare_exchange_strong(deadline, 0)) {
+            g_join_allowed.store(false);
+            g_connected.store(false);
+            esp_wifi_disconnect();
+            if (!g_portal_active.load()) start_portal();
+            g_setup_submitted.store(false);
+            set_status("Wi-Fi timed out; check details in setup page");
+        }
+        vTaskDelay(pdMS_TO_TICKS(250));
     }
 }
 
@@ -428,8 +470,11 @@ bool ensure_network_stack()
     }
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
-    esp_netif_create_default_wifi_ap();
+    g_sta_netif = esp_netif_create_default_wifi_sta();
+    g_ap_netif = esp_netif_create_default_wifi_ap();
+    ESP_ERROR_CHECK(mdns_init());
+    apply_hostname();
+    ESP_ERROR_CHECK(mdns_service_add(nullptr, "_http", "_tcp", kHttpPort, nullptr, 0));
     wifi_init_config_t wifi_config = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&wifi_config));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, nullptr));
@@ -444,6 +489,11 @@ bool ensure_network_stack()
         station.sta.password[sizeof(station.sta.password) - 1] = '\0';
         station.sta.threshold.authmode = WIFI_AUTH_OPEN;
         ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &station));
+    }
+    start_setup_http();
+    if (xTaskCreate(wifi_join_watchdog, "wifi_join", 4096, nullptr, 3, nullptr) != pdPASS) {
+        set_status("Wi-Fi timeout task could not start");
+        return false;
     }
     ESP_ERROR_CHECK(esp_wifi_start());
 
@@ -1197,6 +1247,32 @@ lv_obj_t *add_button(lv_obj_t *parent, const char *caption, int x, int y, int wi
 
 void refresh_ui(lv_timer_t *)
 {
+    const std::string hostname = hostname_copy();
+    if (g_hostname_label) lv_label_set_text(g_hostname_label, hostname.c_str());
+    if (g_setup_title) lv_label_set_text(g_setup_title, hostname.c_str());
+    if (g_setup_screen) {
+        if (g_portal_active.load() && !g_setup_submitted.load()) {
+            lv_obj_remove_flag(g_setup_screen, LV_OBJ_FLAG_HIDDEN);
+            if (!g_sleep_requested.load()) lv_obj_move_foreground(g_setup_screen);
+            // Only regenerate when the client state or saved hostname changes.
+            static std::string displayed_qr;
+            const bool client_connected = g_ap_clients.load() > 0;
+            const std::string qr_payload = client_connected ? "http://" + hostname + ".local/" :
+                "WIFI:T:nopass;S:p4Radio-Setup;;";
+            if (qr_payload != displayed_qr) {
+                if (lv_qrcode_update(g_setup_qr, qr_payload.data(), qr_payload.size()) == LV_RESULT_OK)
+                    displayed_qr = qr_payload;
+                else ESP_LOGE(kTag, "Setup QR code generation failed");
+            }
+            if (!client_connected) {
+                lv_obj_remove_flag(g_setup_qr, LV_OBJ_FLAG_HIDDEN);
+                lv_label_set_text(g_setup_url, "Scan to join p4Radio-Setup");
+            } else {
+                lv_obj_remove_flag(g_setup_qr, LV_OBJ_FLAG_HIDDEN);
+                lv_label_set_text(g_setup_url, ("Scan to open http://" + hostname + ".local/\n\nOr http://192.168.4.1/").c_str());
+            }
+        } else lv_obj_add_flag(g_setup_screen, LV_OBJ_FLAG_HIDDEN);
+    }
     if (g_station_label) lv_label_set_text(g_station_label, kStations[g_station.load()].name);
     if (g_status_label) {
         const std::string text = status_copy();
@@ -1230,9 +1306,13 @@ void build_ui()
     lv_obj_set_style_text_color(screen, lv_color_hex(0xf4f7fb), 0);
 
     lv_obj_t *brand = lv_label_create(screen);
-    lv_label_set_text(brand, "P4 RADIO");
+    g_hostname_label = brand;
+    lv_label_set_text(brand, hostname_copy().c_str());
     lv_obj_set_style_text_color(brand, lv_color_hex(0x60d6ad), 0);
     lv_obj_set_style_text_font(brand, &lv_font_montserrat_24, 0);
+    lv_obj_set_width(brand, 640);
+    lv_obj_set_style_text_align(brand, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(brand, LV_LABEL_LONG_DOT);
     lv_obj_align(brand, LV_ALIGN_TOP_MID, 0, 40);
 
     g_station_label = lv_label_create(screen);
@@ -1270,6 +1350,42 @@ void build_ui()
 
     add_button(screen, "STOP", 100, 635, 220, 64, 4);
     add_button(screen, "SCAN", 400, 635, 220, 64, 5);
+
+    g_setup_screen = lv_obj_create(screen);
+    lv_obj_set_size(g_setup_screen, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_pos(g_setup_screen, 0, 0);
+    lv_obj_set_style_bg_color(g_setup_screen, lv_color_hex(0x101827), 0);
+    lv_obj_set_style_bg_opa(g_setup_screen, LV_OPA_COVER, 0);
+    lv_obj_set_style_text_color(g_setup_screen, lv_color_hex(0xf4f7fb), 0);
+    lv_obj_set_style_border_width(g_setup_screen, 0, 0);
+    lv_obj_remove_flag(g_setup_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_setup_screen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_t *setup_title = lv_label_create(g_setup_screen);
+    g_setup_title = setup_title;
+    lv_obj_set_style_text_color(setup_title, lv_color_hex(0xf4f7fb), 0);
+    lv_label_set_text(setup_title, hostname_copy().c_str());
+    lv_obj_set_width(setup_title, 640);
+    lv_obj_set_style_text_align(setup_title, LV_TEXT_ALIGN_CENTER, 0);
+    lv_label_set_long_mode(setup_title, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_font(setup_title, &lv_font_montserrat_40, 0);
+    lv_obj_align(setup_title, LV_ALIGN_TOP_MID, 0, 50);
+    g_setup_qr = lv_qrcode_create(g_setup_screen);
+    lv_qrcode_set_size(g_setup_qr, 320);
+    lv_qrcode_set_dark_color(g_setup_qr, lv_color_black());
+    lv_qrcode_set_light_color(g_setup_qr, lv_color_white());
+    lv_obj_set_style_pad_all(g_setup_qr, 20, 0);
+    lv_obj_set_style_bg_color(g_setup_qr, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(g_setup_qr, LV_OPA_COVER, 0);
+    lv_obj_align(g_setup_qr, LV_ALIGN_CENTER, 0, -20);
+    constexpr char wifi_qr[] = "WIFI:T:nopass;S:p4Radio-Setup;;";
+    if (lv_qrcode_update(g_setup_qr, wifi_qr, sizeof(wifi_qr) - 1) != LV_RESULT_OK)
+        ESP_LOGE(kTag, "Wi-Fi QR code generation failed");
+    g_setup_url = lv_label_create(g_setup_screen);
+    lv_obj_set_style_text_color(g_setup_url, lv_color_hex(0xf4f7fb), 0);
+    lv_obj_set_width(g_setup_url, 640);
+    lv_obj_set_style_text_font(g_setup_url, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_align(g_setup_url, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(g_setup_url, LV_ALIGN_BOTTOM_MID, 0, -60);
 
     g_wake_overlay = lv_obj_create(screen);
     lv_obj_set_size(g_wake_overlay, LV_PCT(100), LV_PCT(100));

@@ -1,5 +1,6 @@
 dependencies:
   idf: ">=5.5"
+  espressif/mdns: "^1.14.0"
   espressif/cjson: "^1.7.19"
   waveshare/esp32_p4_wifi6_touch_lcd_4b: "3.0.1"
   espressif/esp_wifi_remote: "1.6.3"

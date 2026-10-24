@@ -31,3 +31,7 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # Pre-v3 P4 silicon cannot use the ECDSA peripheral for TLS verification.
 CONFIG_MBEDTLS_HARDWARE_ECDSA_VERIFY=n
+
+# Wi-Fi provisioning QR code.
+CONFIG_LV_USE_QRCODE=y
+CONFIG_LV_USE_CANVAS=y

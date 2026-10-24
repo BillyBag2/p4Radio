@@ -94,3 +94,17 @@ SCAN stops playback, clears all stream URLs in `streams96` and the in-memory can
 Downloading/decoding and speaker output run in separate FreeRTOS tasks. A PSRAM PCM buffer holds ten seconds at the decoded format (about 1.92 MB for 48 kHz stereo, 16-bit). Playback starts at 0.5 seconds; decoding pauses above a five-second target. After an underrun the output waits for two seconds before resuming. Startup still requires downloading the first complete HLS segment. Playback begins one published segment behind the live edge when possible, allowing immediate prefetch at the cost of extra live latency.
 
 The right-edge bar shows volume; numeric volume text and the left buffer indicator are omitted. Station buttons use `<` and `>`, and volume buttons use `-` and `+`. Buffer duration and underrun count are logged every five seconds. The output clock stays at the decoded nominal sample rate; automatic clock tuning/resampling is not implemented. STOP, SCAN, and station changes cancel output and discard buffered audio. Cache qualification counts successful speaker output and restarts after underruns.
+
+### Hostname and setup display
+
+The hostname defaults to `p4radio` and is saved as `hostname` in the `p4radio` NVS namespace. Enter a new name alongside Wi-Fi details on the setup form; names are normalized to lowercase and accept 1?32 ASCII letters/digits with internal hyphens. Enter the name without `.local`. The screen header uses the saved name.
+
+The managed `espressif/mdns` component advertises the hostname and HTTP service on the AP and station interfaces. Open `http://p4radio.local/` (or the saved name) from the same network. The setup web server remains available after joining Wi-Fi. Clients must support mDNS and the network must permit multicast; when connected to the setup AP, `http://192.168.4.1/` is also available.
+
+In AP mode, the display shows a QR code for joining the open `p4Radio-Setup` Wi-Fi network while no clients are associated. Once any client associates, the QR code switches to `http://<hostname>.local/` to open the setup page, with the URL and IP fallback printed below. Disconnecting all AP clients restores the Wi-Fi join QR code and instruction. Successful Wi-Fi provisioning restores the normal radio display. The first QR code joins Wi-Fi; the second QR code opens the setup page.
+
+After adding these changes, run `idf.py update-dependencies` and `idf.py build` in the configured ESP-IDF terminal to resolve mDNS. `CONFIG_LV_USE_QRCODE=y` enables the LVGL QR widget in existing and fresh configurations.
+
+Wi-Fi joins have a 30-second overall deadline, including DHCP, in addition to the disconnect retry limit. This applies after submitting setup details and at saved-network startup. On timeout, the pending join is disconnected and automatic retries stop; the AP setup/QR screen returns. Submitting revised details starts a fresh deadline. Successful IP acquisition cancels the deadline. A separate watchdog task enforces it even if no disconnect event arrives.
+
+Captive interception code is removed: no wildcard DNS responder, catch-all HTTP route, redirects, or captive-probe endpoints are installed. The setup server matches only `/`, `/api/scan`, and `/connect`; other URLs receive the normal HTTP not-found response. Clients join `p4Radio-Setup`, then scan the hostname URL QR or manually open `http://<hostname>.local/`. The same bookmark works on the home network through mDNS. `http://192.168.4.1/` remains an AP-only fallback. The AP has no internet access.
