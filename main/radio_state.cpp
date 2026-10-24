@@ -11,6 +11,7 @@ std::atomic<bool> g_setup_submitted{false};
 std::atomic<bool> g_playback_requested{true};
 std::atomic<bool> g_sleep_requested{false};
 std::atomic<bool> g_idle_ready{false};
+std::atomic<bool> g_resume_requested{false};
 std::atomic<bool> g_scan_requested{false};
 esp_codec_dev_handle_t g_speaker = nullptr;
 std::atomic<int> g_ap_clients{0};

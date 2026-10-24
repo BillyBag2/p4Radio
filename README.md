@@ -21,6 +21,27 @@ password and continue.
 
 ---
 
+## TODO
+
+- [ ] Set hostname.
+- [ ] Beep when waking from dormant.
+- [ ] Different colour to QR codes.
+- [ ] Sounds for QR codes.
+- [ ] Secret hand shake to get to AP mode.
+- [ ] Skins
+- [ ] Circular display support.
+- [ ] Circular display simulation.
+- [ ] Add servers and stations.
+- [ ] list servers and stations.
+- [ ] Disable stations.
+- [ ] Off timers.
+- [ ] RTC support.
+- [ ] NTP support.
+- [ ] Set time zone ?]
+
+
+---
+
 ## Requirements
 
 When unable to connect to the wifi network after a period of trying, enable AP

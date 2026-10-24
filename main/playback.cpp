@@ -368,7 +368,15 @@ void playback_task(void *)
             g_download_kbps.store(0);
             set_status("Stopped; tap the screen to resume");
             g_idle_ready.store(true);
-            while (g_sleep_requested.load()) vTaskDelay(pdMS_TO_TICKS(50));
+            while (g_sleep_requested.load()) {
+                if (g_resume_requested.exchange(false)) {
+                    g_playback_requested.store(true);
+                    g_sleep_requested.store(false);
+                    set_status("Resuming radio...");
+                    break;
+                }
+                vTaskDelay(pdMS_TO_TICKS(20));
+            }
             g_idle_ready.store(false);
         }
         if (g_scan_requested.exchange(false)) {
@@ -404,7 +412,9 @@ void playback_task(void *)
         }
         const int selected = g_station.load();
         play_stream(kStations[selected], selected);
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        // Retain retry backoff, but do not make STOP/wake wait a full second.
+        for (int i = 0; i < 50 && !g_sleep_requested.load(); ++i)
+            vTaskDelay(pdMS_TO_TICKS(20));
     }
 }
 

@@ -49,6 +49,7 @@ extern std::atomic<bool> g_setup_submitted;
 extern std::atomic<bool> g_playback_requested;
 extern std::atomic<bool> g_sleep_requested;
 extern std::atomic<bool> g_idle_ready;
+extern std::atomic<bool> g_resume_requested;
 extern std::atomic<bool> g_scan_requested;
 extern esp_codec_dev_handle_t g_speaker;
 extern std::atomic<int> g_ap_clients;

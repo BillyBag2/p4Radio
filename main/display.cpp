@@ -21,14 +21,13 @@ lv_obj_t *g_rates_label = nullptr;
 
 void wake_on_tap(lv_event_t *)
 {
-    if (!g_idle_ready.load()) return;
+    if (!g_sleep_requested.load()) return;
     // The full-screen overlay consumes this tap, so it cannot activate a control.
     if (g_wake_overlay) lv_obj_add_flag(g_wake_overlay, LV_OBJ_FLAG_HIDDEN);
     const esp_err_t result = bsp_display_brightness_set(100);
     if (result != ESP_OK) ESP_LOGE(kTag, "Backlight restore failed: %s", esp_err_to_name(result));
     request_button_sound();
-    g_playback_requested.store(true);
-    g_sleep_requested.store(false);
+    g_resume_requested.store(true);
     set_status("Resuming radio...");
 }
 
@@ -60,6 +59,7 @@ void radio_button(lv_event_t *event)
         set_status("Stopping stream for a fresh search");
         break;
     case 4:
+        g_resume_requested.store(false);
         g_idle_ready.store(false);
         if (g_wake_overlay) {
             lv_obj_remove_flag(g_wake_overlay, LV_OBJ_FLAG_HIDDEN);
