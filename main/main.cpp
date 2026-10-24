@@ -350,8 +350,16 @@ void start_portal()
     ap.ap.channel = 6;
     ap.ap.max_connection = 4;
     ap.ap.authmode = WIFI_AUTH_OPEN;
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    // Saved-network startup uses STA-only mode. Enable the AP interface before
+    // configuring it, otherwise the fallback path returns ESP_ERR_WIFI_MODE.
+    esp_err_t error = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    if (error == ESP_OK) error = esp_wifi_set_config(WIFI_IF_AP, &ap);
+    if (error != ESP_OK) {
+        g_portal_active.store(false);
+        ESP_LOGE(kTag, "Setup AP failed: %s", esp_err_to_name(error));
+        set_status("Setup AP could not start; restart to retry");
+        return;
+    }
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = kHttpPort;
