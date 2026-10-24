@@ -76,9 +76,7 @@ httpd_handle_t g_http_server = nullptr;
 esp_codec_dev_handle_t g_speaker = nullptr;
 lv_obj_t *g_station_label = nullptr;
 lv_obj_t *g_status_label = nullptr;
-lv_obj_t *g_volume_label = nullptr;
 lv_obj_t *g_volume_bar = nullptr;
-lv_obj_t *g_buffer_bar = nullptr;
 std::atomic<int> g_buffer_percent{0};
 lv_obj_t *g_rates_label = nullptr;
 std::atomic<int> g_stream_kbps{0};
@@ -1196,11 +1194,6 @@ void refresh_ui(lv_timer_t *)
         const std::string text = status_copy();
         lv_label_set_text(g_status_label, text.c_str());
     }
-    if (g_buffer_bar) {
-        const int fill = g_buffer_percent.load();
-        lv_bar_set_value(g_buffer_bar, fill, LV_ANIM_OFF);
-        lv_obj_set_style_bg_color(g_buffer_bar, lv_color_hex(fill < 10 ? 0xe5a458 : 0x60aaff), LV_PART_INDICATOR);
-    }
     if (g_volume_bar) lv_bar_set_value(g_volume_bar, g_volume.load(), LV_ANIM_OFF);
     if (g_rates_label) {
         char rates[100];
@@ -1212,11 +1205,7 @@ void refresh_ui(lv_timer_t *)
         std::snprintf(rates, sizeof(rates), "STREAM %s kbit/s | Wi-Fi RX %s kbit/s", a, b);
         lv_label_set_text(g_rates_label, rates);
     }
-    if (g_volume_label) {
-        char volume[24];
-        std::snprintf(volume, sizeof(volume), "VOLUME  %d / 10", g_volume.load());
-        lv_label_set_text(g_volume_label, volume);
-    }
+
 }
 
 void build_ui()
@@ -1258,14 +1247,6 @@ void build_ui()
     lv_label_set_text(g_rates_label, "STREAM -- kbit/s | Wi-Fi RX -- kbit/s");
     lv_obj_align(g_rates_label, LV_ALIGN_TOP_MID, 0, 280);
 
-    g_buffer_bar = lv_bar_create(screen);
-    lv_obj_set_size(g_buffer_bar, 8, 620);
-    lv_obj_align(g_buffer_bar, LV_ALIGN_LEFT_MID, 6, 0);
-    lv_bar_set_range(g_buffer_bar, 0, 100);
-    lv_bar_set_value(g_buffer_bar, 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(g_buffer_bar, lv_color_hex(0x1b2638), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(g_buffer_bar, lv_color_hex(0x60aaff), LV_PART_INDICATOR);
-
     g_volume_bar = lv_bar_create(screen);
     lv_obj_set_size(g_volume_bar, 8, 620);
     lv_obj_align(g_volume_bar, LV_ALIGN_RIGHT_MID, -6, 0);
@@ -1274,17 +1255,11 @@ void build_ui()
     lv_obj_set_style_bg_color(g_volume_bar, lv_color_hex(0x1b2638), LV_PART_MAIN);
     lv_obj_set_style_bg_color(g_volume_bar, lv_color_hex(0x60d6ad), LV_PART_INDICATOR);
 
-    add_button(screen, "PREV", 100, 330, 200, 110, 0);
-    add_button(screen, "NEXT", 420, 330, 200, 110, 1);
-    add_button(screen, "VOL -", 100, 485, 200, 95, 2);
-    add_button(screen, "VOL +", 420, 485, 200, 95, 3);
+    add_button(screen, "<", 100, 330, 200, 110, 0);
+    add_button(screen, ">", 420, 330, 200, 110, 1);
+    add_button(screen, "-", 100, 485, 200, 95, 2);
+    add_button(screen, "+", 420, 485, 200, 95, 3);
 
-    g_volume_label = lv_label_create(screen);
-    char volume[24];
-    std::snprintf(volume, sizeof(volume), "VOLUME  %d / 10", g_volume.load());
-    lv_label_set_text(g_volume_label, volume);
-    lv_obj_set_style_text_color(g_volume_label, lv_color_hex(0xa9b8ca), 0);
-    lv_obj_align(g_volume_label, LV_ALIGN_TOP_MID, 0, 595);
     add_button(screen, "STOP", 100, 635, 220, 64, 4);
     add_button(screen, "SCAN", 400, 635, 220, 64, 5);
 
