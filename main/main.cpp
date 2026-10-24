@@ -339,11 +339,47 @@ esp_err_t connect_network(httpd_req_t *request)
     apply_hostname();
     save_wifi_credentials(ssid.c_str(), password.c_str());
     g_setup_submitted.store(true);
-    httpd_resp_set_type(request, "text/html; charset=utf-8");
-    static constexpr char response[] = "<!doctype html><meta name=viewport content='width=device-width'><h2>Connecting…</h2><p>Keep p4Radio powered on. The setup network will close after it joins Wi-Fi.</p>";
-    const esp_err_t result = httpd_resp_send(request, response, HTTPD_RESP_USE_STRLEN);
+    // Post/Redirect/Get: refresh must never repeat credential writes or joins.
+    httpd_resp_set_status(request, "303 See Other");
+    httpd_resp_set_hdr(request, "Location", "/connecting");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    const esp_err_t result = httpd_resp_send(request, nullptr, 0);
     configure_station(ssid.c_str(), password.c_str());
     return result;
+}
+
+esp_err_t connecting_page(httpd_req_t *request)
+{
+    static constexpr char page[] = R"HTML(<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connecting p4Radio</title><style>
+body{font:17px system-ui;background:#101827;color:#f3f6fb;padding:24px}main{max-width:480px;margin:40px auto;background:#1b2638;padding:24px;border-radius:18px}a{color:#60d6ad}.spinner{width:36px;height:36px;border:4px solid #435269;border-top-color:#60d6ad;border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.spinner{animation:none}}</style></head><body><main aria-busy="true"><div class="spinner" aria-hidden="true"></div><h1>Connecting...</h1><p>Your Wi-Fi details are saved. Please wait while the radio connects.</p><p id="progress" role="status">Waiting for the radio to reconnect...</p><p>The setup network closes after a successful connection. Rejoin your usual Wi-Fi network if necessary, then open the radio's bookmarked hostname URL.</p><p><a href="/">Return now</a></p></main><script>
+const progress=document.getElementById('progress');
+async function checkConnection(){
+  try{
+    const response=await fetch('/api/connection',{cache:'no-store',signal:AbortSignal.timeout(800)});
+    if(!response.ok)throw new Error('Unavailable');
+    const state=await response.json();
+    if(state.connected){progress.textContent='Connected. Opening the home page...';window.location.replace('/');return;}
+    if(!state.connecting){document.querySelector('main').setAttribute('aria-busy','false');document.querySelector('.spinner').style.display='none';progress.textContent='Connection failed. Return to setup to check your Wi-Fi details.';return;}
+    progress.textContent='Connecting to Wi-Fi...';
+  }catch(error){progress.textContent='Waiting for the radio. If necessary, reconnect your phone to your home Wi-Fi.';}
+  setTimeout(checkConnection,1000);
+}
+setTimeout(checkConnection,3000);
+</script></body></html>)HTML";
+    httpd_resp_set_type(request, "text/html; charset=utf-8");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    return httpd_resp_send(request, page, HTTPD_RESP_USE_STRLEN);
+}
+
+esp_err_t connection_state(httpd_req_t *request)
+{
+    const bool connected = g_connected.load();
+    const bool connecting = g_join_allowed.load() && g_join_deadline_us.load() != 0;
+    const char *body = connected ? "{\"connected\":true,\"connecting\":false}" :
+        connecting ? "{\"connected\":false,\"connecting\":true}" : "{\"connected\":false,\"connecting\":false}";
+    httpd_resp_set_type(request, "application/json");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    return httpd_resp_send(request, body, HTTPD_RESP_USE_STRLEN);
 }
 
 void start_setup_http()
@@ -363,6 +399,10 @@ void start_setup_http()
     ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &root));
     ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &scan));
     ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &connect));
+    const httpd_uri_t connecting{.uri = "/connecting", .method = HTTP_GET, .handler = connecting_page, .user_ctx = nullptr};
+    ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &connecting));
+    const httpd_uri_t state{.uri = "/api/connection", .method = HTTP_GET, .handler = connection_state, .user_ctx = nullptr};
+    ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &state));
 }
 
 void start_portal()
