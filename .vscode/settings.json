@@ -33,5 +33,9 @@
     "--query-driver=**",
     "--compile-commands-dir=c:\\repos\\p4Radio\\build"
   ],
-  "idf.flashType": "UART"
+  "idf.flashType": "UART",
+  "cSpell.words": [
+    "PSRAM",
+    "Waveshare"
+  ]
 }

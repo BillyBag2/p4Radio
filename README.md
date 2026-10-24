@@ -2,28 +2,53 @@
 
 A simple internet radio targeting the Waveshare ESP32-P4-86-Panel-ETH-2RO (SKU 31570).
 
-## Features
+## Usage
 
-In the absence of information to connect to wifi. default to an AP and display an appropriate message. Allow a phone to connect without a password and use capture to redirect to a simple web page that lists available wifi networks and allows the user to select one and enter a password. The device will then attempt to connect to the selected network and display an appropriate message.
+### First setup, or new wifi location
 
-When connected to a network, the device tune to the last station or a default station. 
+#### Connect your phone directly to the p4Radio
+
+If the p4Radio cannot connect to it's configured WiFi it displays a
+QRcode. Scan the with your phone, or follow the instructions, to connect
+directly to p4radio. A new QR code will be displayed.
+
+#### Go to setup page
+
+Scan the second QR code with your phone, or follow the instructions, to go to
+the p4radio setup page. On the page, Wait for the WiFi scan to complete. Click
+the list of available networks to select one for p4radio to use. Enter the WiFi
+password and continue.
+
+---
+
+## Requirements
+
+When unable to connect to the wifi network after a period of trying, enable AP
+mode and display a QR code advertising the AP SSID.
+
+When a client joins the AP network display an QR code to take them to the setup
+page.
+
+Allow entry of wifi details.
+
+When connected to a network, the device will be configures in the same way as it was when previously used. It will attempt to provide the current station.
 
 The list of available stations will be BBC1 BBC2 BBC4 BBC4 BBC5.
 
 Display the station name.
 
-Add up and down buttons to change station an + and - buttons to change volume.
+GUI allows navigation to the different stations.
+GUI allows changing the volume.
 
-A STOP button pauses audio and blanks the display while keeping Wi-Fi and touch active. Tap the screen to resume.
+GUI allows changing to a dormant state where the device appears to be off.
 
 ## Hardware specifications
 
-| Component | Specification |
+| Component | ESP32-P4-86-Panel-ETH-2RO |
 | --- | --- |
 | Main processor | ESP32-P4NRW32, dual-core 32-bit RISC-V high-performance CPU up to 360 MHz, plus a low-power RISC-V core up to 40 MHz |
-| Chip revision | ESP32-P4 revision 1.3 (reported for this board); firmware targets the pre-v3 silicon branch. |
-| Internal memory | 768 KB high-performance L2 memory, 32 KB low-power SRAM, 128 KB HP ROM and 16 KB LP ROM |
-| PSRAM | 32 MB, stacked in the ESP32-P4 package; 1.8 V, 16-line (HEX) interface, up to 200 MHz |
+| Chip revision | ESP32-P4 revision 1.3. Target pre-v3 silicon branch. |
+| PSRAM | 32 MB up to 200 MHz |
 | Flash | 32 MB external SPI NOR flash |
 | Display | 4-inch IPS, 720 x 720 pixels, 2-lane MIPI DSI; ST7703 driver; backlight enable GPIO33, PWM GPIO26, reset GPIO27 |
 | Touch | GT911 five-point capacitive touch controller over I2C; SDA GPIO7, SCL GPIO8, reset GPIO23; interrupt is routed to a test point |
@@ -33,8 +58,6 @@ A STOP button pauses audio and blanks the display while keeping Wi-Fi and touch 
 | Other board I/O | TF/microSD slot, USB 2.0 High-Speed OTG, USB-to-UART, RS485 and two isolated relay outputs |
 | Power | DC 6-30 V input on the ETH-2RO bottom board; USB-C power/programming on the main board |
 
-The P4 does not contain a Wi-Fi radio. Wi-Fi and Bluetooth use the onboard ESP32-C6 coprocessor, which needs its own compatible firmware and SDIO host support in addition to P4 settings. `sdkconfig.defaults` includes the ESP-Hosted settings for that C6, 32 MB flash, 32 MB HEX PSRAM at 200 MHz, and the pre-v3 P4 silicon branch with a 360 MHz CPU clock for revision 1.3.
-
 ## Radio controls and setup
 
 At first boot, the radio opens the unsecured `p4Radio-Setup` Wi-Fi network. Join it from a phone; its captive portal scans nearby networks and saves the chosen SSID and password in NVS before connecting. After Wi-Fi comes up, p4Radio fetches the selected BBC HLS playlist, extracts AAC audio from its MPEG-TS segments, and sends decoded audio to the onboard ES8311 codec and speaker output. The five presets are BBC Radio 1, 2, 4, 4 Extra, and 5 Live; Radio 4 Extra fills the repeated BBC 4 entry in the original list. Station and volume selections are retained across restarts.
@@ -42,8 +65,6 @@ At first boot, the radio opens the unsecured `p4Radio-Setup` Wi-Fi network. Join
 The display has previous/next station, volume down/up, STOP, and SCAN controls. STOP uses an awake idle mode so touch polling and Wi-Fi remain active; tapping the dark screen resumes playback. This consumes more power than deep sleep. The GT911 interrupt is not connected to an MCU GPIO on this board, so deep sleep cannot provide touch wake.
 
 Wi-Fi provisioning and playback require a compatible ESP32-C6 ESP-Hosted slave image. The P4 host dependencies are pinned in [`main/idf_component.yml`](main/idf_component.yml). Waveshare's published examples do not include the C6 image, so a board with a missing or incompatible image cannot provide the setup AP until its C6 firmware is installed. The app reports that link failure on screen.
-
-## Build
 
 ### Station discovery and stream cache
 
