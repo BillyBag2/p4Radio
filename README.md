@@ -133,3 +133,21 @@ Captive interception code is removed: no wildcard DNS responder, catch-all HTTP 
 Successful setup submissions use HTTP 303 to redirect from POST `/connect` to GET `/connecting`. Refreshing that page does not save credentials again or restart the Wi-Fi join deadline.
 
 The connecting page shows a busy indicator, waits three seconds, then polls `/api/connection` once per second after each response. It navigates to `/` using GET only once Wi-Fi is connected, and shows a retry message if the join fails. Unreachable requests leave the page open and retry. A manual return link is available. If the setup AP closes on a successful join, reconnect the phone to the home network to reach the bookmarked hostname URL.
+
+### Firmware source layout
+
+- `main/main.cpp`: NVS initialization, cache migration, and startup orchestration.
+- `main/radio.hpp` and `main/radio_state.cpp`: shared constants, interfaces, and state.
+- `main/settings.cpp`: saved preferences, hostname validation, and status helpers.
+- `main/network.cpp`: Wi-Fi lifecycle, join timeout, mDNS, and setup HTTP pages.
+- `main/streams.cpp`: stream discovery/cache, HTTP fetches, HLS parsing, and MPEG-TS extraction.
+- `main/playback.cpp`: AAC decoding, PSRAM buffering, speaker task, and playback lifecycle.
+- `main/display.cpp`: LVGL layout, QR setup display, controls, and tap-to-resume.
+
+### Button feedback
+
+`assets/sounds/button.wav` is preserved unchanged. Run `python tools/convert_button_sound.py` to regenerate `main/button_sound_data.hpp`: a 24 kHz mono, signed 16-bit PCM array (1,560 samples / 3,120 bytes). The converter uses a windowed-sinc low-pass resampler and short endpoint fades; Python standard library only.
+
+Button clicks and the wake tap request feedback without blocking the LVGL handler. During radio playback the sound is interpolated to the output sample rate and mixed into 16-bit PCM, with brief radio attenuation and clipping protection. A small task handles feedback when no radio audio is playing, including buffering periods. Speaker writes/open/close operations are serialized; STOP/SCAN/station transitions finish pending feedback before closing the codec. Rapid requests coalesce or restart the effect instead of building an unbounded queue.
+
+UI button callbacks queue preference saves and volume updates for the background button-audio task. They do not wait for the speaker mutex, codec writes, or NVS commits. The background task uses a short speaker-lock timeout and retries without blocking LVGL.
