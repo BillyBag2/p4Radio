@@ -87,6 +87,7 @@ void audio_output_task(void *argument)
         if (priming) {
             if (available < threshold) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
             priming = false;
+            set_stream_loading_sound(false);
             set_status((std::string("Playing ") + kStations[buffer.station].name).c_str());
         }
         const size_t wanted = std::min(available, sizeof(pcm)) / buffer.frame_bytes * buffer.frame_bytes;
@@ -97,6 +98,7 @@ void audio_output_task(void *argument)
             set_status("Buffering audio...");
             threshold = buffer.bytes_per_second * 2;
             priming = true;
+            set_stream_loading_sound(true);
             continue;
         }
         const size_t count = xStreamBufferReceive(buffer.stream, pcm, wanted, 0);
@@ -119,6 +121,11 @@ void audio_output_task(void *argument)
 
 bool play_stream(const Station &station, int station_index)
 {
+    set_stream_loading_sound(true);
+    // All failure/cancellation exits stop the loading layer, including early returns.
+    struct LoadingSoundScope {
+        ~LoadingSoundScope() { set_stream_loading_sound(false); }
+    } loading_sound_scope;
     g_stream_kbps.store(0);
     g_download_kbps.store(0);
     set_status((std::string("Loading ") + station.name).c_str());

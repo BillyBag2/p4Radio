@@ -23,6 +23,12 @@ httpd_handle_t g_http_server = nullptr;
 esp_netif_t *g_sta_netif = nullptr;
 esp_netif_t *g_ap_netif = nullptr;
 
+bool wifi_join_in_progress()
+{
+    return g_saved_ssid[0] && g_join_allowed.load() && g_join_deadline_us.load() != 0 &&
+        !g_connected.load() && !g_sleep_requested.load();
+}
+
 void apply_hostname()
 {
     const std::string name = hostname_copy();

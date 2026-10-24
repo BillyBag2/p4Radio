@@ -4,6 +4,7 @@
 namespace p4radio {
 void initialize_button_audio();
 void request_button_sound();
+void set_stream_loading_sound(bool loading);
 void request_preferences_save();
 void lock_speaker();
 void unlock_speaker();

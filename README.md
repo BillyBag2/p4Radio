@@ -150,4 +150,12 @@ The connecting page shows a busy indicator, waits three seconds, then polls `/ap
 
 Button clicks and the wake tap request feedback without blocking the LVGL handler. During radio playback the sound is interpolated to the output sample rate and mixed into 16-bit PCM, with brief radio attenuation and clipping protection. A small task handles feedback when no radio audio is playing, including buffering periods. Speaker writes/open/close operations are serialized; STOP/SCAN/station transitions finish pending feedback before closing the codec. Rapid requests coalesce or restart the effect instead of building an unbounded queue.
 
-UI button callbacks queue preference saves and volume updates for the background button-audio task. They do not wait for the speaker mutex, codec writes, or NVS commits. The background task uses a short speaker-lock timeout and retries without blocking LVGL.
+UI button callbacks queue preference saves for a separate low-priority task and volume updates for audio processing. They do not wait for the speaker mutex, codec writes, or NVS commits. The audio task uses a short speaker-lock timeout and retries without blocking LVGL. Click requests wake it immediately. Preference writes are coalesced until 500 ms after the last button change; a sudden power loss during that interval can lose the most recent selection.
+
+### Wi-Fi connection sound
+
+`assets/sounds/data-24.wav` is converted by `python tools/convert_data_sound.py` to `main/data_sound_data.hpp` (24 kHz mono signed 16-bit PCM, 48,000 samples / 96,000 bytes). The original WAV is unchanged. The data sound loops at half sample amplitude while attempting to join saved Wi-Fi, including reconnects and joins submitted through setup, until an IP address is obtained or the join fails/times out. STOP suppresses it. Button feedback mixes over this layer. Loop playback uses the existing speaker task and mutex, without blocking UI callbacks or adding a decoder instance.
+
+### Stream tuning sound
+
+`assets/sounds/radio-tuning.wav` is preserved and converted by `python tools/convert_tuning_sound.py` from 44.1 kHz mono to `main/tuning_sound_data.hpp`: 24 kHz signed 16-bit PCM, 120,000 samples / 240,000 bytes. It loops at half amplitude during stream lookup, loading, initial buffering, and underrun refill. It stops when buffered playback starts, the attempt fails, or playback is stopped. Wi-Fi connection feedback takes priority if the network is reconnecting; button clicks layer over either background effect. No extra runtime decoder is required.

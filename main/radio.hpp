@@ -71,6 +71,7 @@ void save_preferences();
 void load_preferences();
 void save_wifi_credentials(const char *ssid, const char *password);
 bool ensure_network_stack();
+bool wifi_join_in_progress();
 std::string cached_stream(int index);
 void cache_stream(int index, const std::string &url);
 std::string resolve_station_url(const Station &station, int index);
