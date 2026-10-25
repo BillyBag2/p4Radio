@@ -17,6 +17,7 @@ esp_codec_dev_handle_t g_speaker = nullptr;
 std::atomic<int> g_ap_clients{0};
 char g_hostname[33] = "p4radio";
 std::atomic<int> g_stream_kbps{0};
+std::atomic<int> g_stream_channels{0};
 std::atomic<int> g_download_kbps{0};
 std::atomic<int64_t> g_download_time{0};
 std::map<std::string, int> g_url_bitrates;

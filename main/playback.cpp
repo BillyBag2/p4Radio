@@ -1,5 +1,6 @@
 #include "radio.hpp"
 #include "button_audio.hpp"
+#include "buffer_sync.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -71,24 +72,45 @@ bool audio_cancelled(const AudioBuffer &buffer)
 void audio_output_task(void *argument)
 {
     auto &buffer = *static_cast<AudioBuffer *>(argument);
-    uint8_t pcm[4096];
+    alignas(int16_t) uint8_t pcm[4096];
+    // Keep the extra output block off the 6 KB task stack.
+    auto *matched = static_cast<int16_t *>(heap_caps_malloc(sizeof(pcm) + 64, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!matched) {
+        buffer.error.store(true);
+        xSemaphoreGive(buffer.done);
+        vTaskDelete(nullptr);
+        return;
+    }
+    BufferRateController controller;
+    PcmRateMatcher matcher;
+    controller.reset(kAudioBufferTargetSeconds);
+    TickType_t last_control = xTaskGetTickCount();
+    const size_t pcm_channels = buffer.frame_bytes / sizeof(int16_t);
     bool priming = true;
     size_t threshold = buffer.bytes_per_second / 2; // Fast start: 0.5 seconds.
     TickType_t last_log = xTaskGetTickCount();
     while (!audio_cancelled(buffer)) {
         const size_t available = xStreamBufferBytesAvailable(buffer.stream);
-        g_buffer_percent.store(static_cast<int>(available * 100 / (buffer.bytes_per_second * 10)));
+        g_buffer_percent.store(static_cast<int>(available * 100 / (buffer.bytes_per_second * kAudioBufferSeconds)));
         if (xTaskGetTickCount() - last_log >= pdMS_TO_TICKS(5000)) {
-            ESP_LOGI(kTag, "Audio buffer: %u ms / 10000 ms, underruns: %lu",
+            ESP_LOGI(kTag, "Audio buffer: %u ms / %u ms, underruns: %lu, rate correction: %+d ppm",
                 static_cast<unsigned>(available * 1000 / buffer.bytes_per_second),
-                static_cast<unsigned long>(buffer.underruns.load()));
+                static_cast<unsigned>(kAudioBufferSeconds * 1000),
+                static_cast<unsigned long>(buffer.underruns.load()), controller.ppm());
             last_log = xTaskGetTickCount();
         }
         if (priming) {
             if (available < threshold) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
             priming = false;
+            controller.reset(kAudioBufferTargetSeconds);
+            matcher.reset();
+            last_control = xTaskGetTickCount();
             set_stream_loading_sound(false);
             set_status((std::string("Playing ") + kStations[buffer.station].name).c_str());
+        }
+        if (xTaskGetTickCount() - last_control >= pdMS_TO_TICKS(1000)) {
+            controller.update(static_cast<float>(available) / buffer.bytes_per_second, kAudioBufferTargetSeconds);
+            last_control = xTaskGetTickCount();
         }
         const size_t wanted = std::min(available, sizeof(pcm)) / buffer.frame_bytes * buffer.frame_bytes;
         if (!wanted) {
@@ -103,17 +125,22 @@ void audio_output_task(void *argument)
         }
         const size_t count = xStreamBufferReceive(buffer.stream, pcm, wanted, 0);
         if (audio_cancelled(buffer)) break;
+        const size_t output_frames = matcher.process(reinterpret_cast<const int16_t *>(pcm),
+            count / buffer.frame_bytes, pcm_channels, controller.ppm(), matched);
+        const size_t output_bytes = output_frames * buffer.frame_bytes;
+        if (!output_bytes) continue;
         lock_speaker();
-        mix_button_sound(pcm, count);
-        const int written = esp_codec_dev_write(g_speaker, pcm, count);
+        mix_button_sound(reinterpret_cast<uint8_t *>(matched), output_bytes);
+        const int written = esp_codec_dev_write(g_speaker, matched, output_bytes);
         unlock_speaker();
         if (written != ESP_CODEC_DEV_OK) {
             buffer.error.store(true);
             break;
         }
-        buffer.played_ms.fetch_add(static_cast<uint32_t>(count * 1000 / buffer.bytes_per_second));
+        buffer.played_ms.fetch_add(static_cast<uint32_t>(output_bytes * 1000 / buffer.bytes_per_second));
         buffer.last_output.store(xTaskGetTickCount());
     }
+    heap_caps_free(matched);
     g_buffer_percent.store(0);
     xSemaphoreGive(buffer.done);
     vTaskDelete(nullptr);
@@ -127,6 +154,7 @@ bool play_stream(const Station &station, int station_index)
         ~LoadingSoundScope() { set_stream_loading_sound(false); }
     } loading_sound_scope;
     g_stream_kbps.store(0);
+    g_stream_channels.store(0);
     g_download_kbps.store(0);
     set_status((std::string("Loading ") + station.name).c_str());
     const std::string playlist_url = resolve_station_url(station, station_index);
@@ -269,19 +297,21 @@ bool play_stream(const Station &station, int station_index)
             if (decoded.decoded_size) {
                 if (first_audio) {
                     esp_audio_simple_dec_info_t info{};
-                    if (esp_audio_simple_dec_get_info(decoder, &info) != ESP_AUDIO_ERR_OK || !open_speaker(info)) {
+                    if (esp_audio_simple_dec_get_info(decoder, &info) != ESP_AUDIO_ERR_OK ||
+                        info.bits_per_sample != 16 || (info.channel != 1 && info.channel != 2) || !open_speaker(info)) {
                         set_status("Audio codec setup failed");
                         failed = true;
                         raw.len = 0;
                         break;
                     }
+                    g_stream_channels.store(info.channel);
                     audio.frame_bytes = info.channel * (info.bits_per_sample / 8);
                     audio.bytes_per_second = static_cast<size_t>(info.sample_rate) * audio.frame_bytes;
                     if (!audio.frame_bytes || !audio.bytes_per_second || audio.bytes_per_second > 768000) {
                         failed = true;
                         break;
                     }
-                    const size_t capacity = audio.bytes_per_second * 10;
+                    const size_t capacity = audio.bytes_per_second * kAudioBufferSeconds;
                     audio.storage = static_cast<uint8_t *>(heap_caps_malloc(capacity + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
                     if (!audio.storage) { failed = true; break; }
                     audio.stream = xStreamBufferCreateStatic(capacity + 1, 1, audio.storage, &audio.stream_state);
@@ -305,8 +335,8 @@ bool play_stream(const Station &station, int station_index)
                     }
                     if (audio.error.load()) { failed = true; break; }
                     if (audio_cancelled(audio)) break;
-                    // Pace decoding around the five-second watermark, leaving room for bursts.
-                    while (xStreamBufferBytesAvailable(audio.stream) > audio.bytes_per_second * 5 &&
+                    // Pace decoding around the configured watermark, leaving room for bursts.
+                    while (xStreamBufferBytesAvailable(audio.stream) > audio.bytes_per_second * kAudioBufferTargetSeconds &&
                            !audio_cancelled(audio) && !audio.error.load()) vTaskDelay(pdMS_TO_TICKS(20));
                     last_audio_tick = xTaskGetTickCount();
                     esp_audio_simple_dec_info_t info{};
@@ -396,7 +426,7 @@ void playback_task(void *)
             g_download_kbps.store(0);
             if (result != ESP_OK) {
                 ESP_LOGE(kTag, "Stream cache clear failed: %s", esp_err_to_name(result));
-                set_status("Cache clear failed; press SCAN to retry");
+                set_status("Cache clear failed; press TUNE to retry");
                 g_playback_requested.store(false);
             } else {
                 set_status("Cache cleared; searching for a stream");

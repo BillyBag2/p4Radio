@@ -68,17 +68,19 @@ do not claim a successful build or install/replace the user's setup implicitly.
 - Stations prefer AAC HLS near 96 kbit/s, with BBC worldwide 96 kbit/s fallbacks.
   The player supports unencrypted AAC in MPEG-TS and basic master playlists;
   enabled decoder libraries do not imply support for other stream containers.
-- Decoding/download and speaker output run concurrently. PCM capacity is ten
-  seconds, startup threshold 0.5 seconds, target five seconds, and underrun
-  refill two seconds. There is no automatic clock tuning. Keep PSRAM buffers
+- Decoding/download and speaker output run concurrently. PCM capacity is twenty
+  seconds, startup threshold 0.5 seconds, target ten seconds, and underrun
+  refill two seconds. The I2S clock stays fixed; bounded fractional PCM resampling corrects drift
+  within +/-1000 ppm, with a smoothed ten-second target and 9-11 second dead
+  band. Preserve the interpolation phase across blocks and reset on refill. Keep PSRAM buffers
   out of task stacks and preserve cancellation/join-before-free ordering.
-- Volume is 1-10. The right-edge bar shows volume; there is no buffer bar or
+- Volume is 1-10. The right-edge bar shows volume; the left-edge bar shows buffer fill and there is no
   numeric volume label. Station buttons are `<`/`>` and volume buttons `-`/`+`.
-- STOP is awake idle, not deep sleep: backlight off, Wi-Fi and touch polling
+- OFF is awake idle, not deep sleep: backlight off, Wi-Fi and touch polling
   active. The touch interrupt is not wired to an MCU wake pin. A wake tap must
   be consumed without activating an underlying button. Restore the screen
   promptly even if playback cleanup is still pending.
-- SCAN clears stream URLs/candidates and forces fresh discovery. Preserve Wi-Fi,
+- TUNE clears stream URLs/candidates and forces fresh discovery. Preserve Wi-Fi,
   hostname, volume, and station preferences.
 - Wi-Fi joins have a 30-second deadline including DHCP. Failure restores AP
   setup; successful IP acquisition cancels the deadline.
@@ -127,5 +129,5 @@ build when the environment permits. There is no established automated test
 suite; do not substitute host checks for hardware verification. For relevant
 changes, describe board checks such as wrong-password timeout, AP QR transitions,
 refresh without POST replay, uninterrupted playback, immediate volume/clicks,
-SCAN, and STOP/tap resume. State which checks actually ran and what remains
+TUNE, and OFF/tap resume. State which checks actually ran and what remains
 unverified. Do not flash, erase storage, stage, or commit unless requested.
