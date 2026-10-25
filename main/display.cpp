@@ -20,6 +20,33 @@ lv_obj_t *g_status_label = nullptr;
 lv_obj_t *g_volume_bar = nullptr;
 lv_obj_t *g_buffer_bar = nullptr;
 lv_obj_t *g_bandwidth_needle = nullptr;
+namespace {
+bool manual_settings_qr = false;
+bool automatic_qr_dismissed = false;
+std::string displayed_qr;
+}
+
+void show_settings_qr(lv_event_t *)
+{
+    if (g_sleep_requested.load()) return;
+    request_button_sound();
+    manual_settings_qr = true;
+    const std::string url = "http://" + hostname_copy() + ".local/";
+    if (lv_qrcode_update(g_setup_qr, url.data(), url.size()) == LV_RESULT_OK) displayed_qr = url;
+    else ESP_LOGE(kTag, "Settings QR generation failed");
+    lv_label_set_text(g_setup_url, (url + "\n\nTap anywhere to return").c_str());
+    lv_obj_set_style_bg_color(g_setup_screen, lv_color_hex(0x4a3008), 0);
+    lv_obj_remove_flag(g_setup_screen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(g_setup_screen);
+}
+
+void dismiss_setup_qr(lv_event_t *)
+{
+    request_button_sound();
+    manual_settings_qr = false;
+    automatic_qr_dismissed = true;
+    lv_obj_add_flag(g_setup_screen, LV_OBJ_FLAG_HIDDEN);
+}
 constexpr int kMeterWidth = 280;
 constexpr int kMeterHeight = 28;
 constexpr int kNeedleWidth = 4;
@@ -100,40 +127,34 @@ lv_obj_t *add_button(lv_obj_t *parent, const char *caption, int x, int y, int wi
 void refresh_ui(lv_timer_t *)
 {
     const std::string hostname = hostname_copy();
-    if (g_hostname_label) lv_label_set_text(g_hostname_label, hostname.c_str());
+    if (g_hostname_label) lv_label_set_text(g_hostname_label, ("http://" + hostname + ".local/").c_str());
     if (g_setup_title) lv_label_set_text(g_setup_title, hostname.c_str());
-    static int previous_qr_stage = 0;
+    static int previous_automatic_stage = 0;
+    const int automatic_stage = g_portal_active.load() && !g_setup_submitted.load() ?
+        (g_ap_clients.load() > 0 ? 2 : 1) : 0;
+    const bool automatic_changed = automatic_stage != previous_automatic_stage;
+    if (automatic_changed) automatic_qr_dismissed = false;
+    previous_automatic_stage = automatic_stage;
     if (g_setup_screen) {
-        if (g_portal_active.load() && !g_setup_submitted.load()) {
-            lv_obj_remove_flag(g_setup_screen, LV_OBJ_FLAG_HIDDEN);
-            if (!g_sleep_requested.load()) lv_obj_move_foreground(g_setup_screen);
-            // Only regenerate when the client state or saved hostname changes.
-            static std::string displayed_qr;
-            const bool client_connected = g_ap_clients.load() > 0;
-            const int qr_stage = client_connected ? 2 : 1;
-            if (qr_stage != previous_qr_stage) {
-                lv_obj_set_style_bg_color(g_setup_screen, lv_color_hex(client_connected ? 0x4a3008 : 0x480f18), 0);
-                if (!g_sleep_requested.load()) request_disconnect_sound();
-                previous_qr_stage = qr_stage;
-            }
-            const std::string qr_payload = client_connected ? "http://" + hostname + ".local/" :
-                "WIFI:T:nopass;S:p4Radio-Setup;;";
-            if (qr_payload != displayed_qr) {
-                if (lv_qrcode_update(g_setup_qr, qr_payload.data(), qr_payload.size()) == LV_RESULT_OK)
-                    displayed_qr = qr_payload;
+        if (manual_settings_qr || (automatic_stage && !automatic_qr_dismissed)) {
+            const bool wifi_join_qr = !manual_settings_qr && automatic_stage == 1;
+            const std::string url = "http://" + hostname + ".local/" + (manual_settings_qr ? "" : "wifi");
+            const std::string payload = wifi_join_qr ? "WIFI:T:nopass;S:p4Radio-Setup;;" : url;
+            // Regenerate only when the mode or hostname changes.
+            if (payload != displayed_qr) {
+                if (lv_qrcode_update(g_setup_qr, payload.data(), payload.size()) == LV_RESULT_OK)
+                    displayed_qr = payload;
                 else ESP_LOGE(kTag, "Setup QR code generation failed");
             }
-            if (!client_connected) {
-                lv_obj_remove_flag(g_setup_qr, LV_OBJ_FLAG_HIDDEN);
-                lv_label_set_text(g_setup_url, "Scan to join p4Radio-Setup");
-            } else {
-                lv_obj_remove_flag(g_setup_qr, LV_OBJ_FLAG_HIDDEN);
-                lv_label_set_text(g_setup_url, ("Scan to open http://" + hostname + ".local/\n\nOr http://192.168.4.1/").c_str());
-            }
-        } else {
-            lv_obj_add_flag(g_setup_screen, LV_OBJ_FLAG_HIDDEN);
-            previous_qr_stage = 0;
-        }
+            lv_obj_set_style_bg_color(g_setup_screen, lv_color_hex(wifi_join_qr ? 0x480f18 : 0x4a3008), 0);
+            if (wifi_join_qr) lv_label_set_text(g_setup_url, "Scan to join p4Radio-Setup\n\nTap anywhere to return");
+            else if (manual_settings_qr) lv_label_set_text(g_setup_url, (url + "\n\nTap anywhere to return").c_str());
+            else lv_label_set_text(g_setup_url, ("Scan to open " + url + "\nOr http://192.168.4.1/wifi\nTap anywhere to return").c_str());
+            if (automatic_changed && automatic_stage && !manual_settings_qr && !g_sleep_requested.load())
+                request_disconnect_sound();
+            lv_obj_remove_flag(g_setup_screen, LV_OBJ_FLAG_HIDDEN);
+            if (!g_sleep_requested.load()) lv_obj_move_foreground(g_setup_screen);
+        } else lv_obj_add_flag(g_setup_screen, LV_OBJ_FLAG_HIDDEN);
     }
     if (g_station_label) lv_label_set_text(g_station_label, kStations[g_station.load()].name);
     if (g_status_label) {
@@ -147,12 +168,18 @@ void refresh_ui(lv_timer_t *)
         lv_label_set_text(g_status_label, text.c_str());
     }
     if (g_buffer_bar) {
+        if (g_show_buffer_bar.load()) lv_obj_remove_flag(g_buffer_bar, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(g_buffer_bar, LV_OBJ_FLAG_HIDDEN);
         const int fill = g_buffer_percent.load();
         lv_bar_set_value(g_buffer_bar, fill, LV_ANIM_OFF);
         const int low_threshold = 100 / kAudioBufferSeconds; // One second remaining.
         lv_obj_set_style_bg_color(g_buffer_bar, lv_color_hex(fill < low_threshold ? 0xffa020 : 0x309cff), LV_PART_INDICATOR);
     }
-    if (g_volume_bar) lv_bar_set_value(g_volume_bar, g_volume.load(), LV_ANIM_OFF);
+    if (g_volume_bar) {
+        if (g_show_volume_bar.load()) lv_obj_remove_flag(g_volume_bar, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(g_volume_bar, LV_OBJ_FLAG_HIDDEN);
+        lv_bar_set_value(g_volume_bar, g_volume.load(), LV_ANIM_OFF);
+    }
     if (g_bandwidth_needle) {
         const int stream = g_stream_kbps.load();
         const int wifi = g_download_kbps.load();
@@ -183,7 +210,10 @@ void build_ui()
 
     lv_obj_t *brand = lv_label_create(screen);
     g_hostname_label = brand;
-    lv_label_set_text(brand, hostname_copy().c_str());
+    lv_label_set_text(brand, ("http://" + hostname_copy() + ".local/").c_str());
+    lv_obj_set_style_text_decor(brand, LV_TEXT_DECOR_UNDERLINE, 0);
+    lv_obj_add_flag(brand, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(brand, show_settings_qr, LV_EVENT_CLICKED, nullptr);
     lv_obj_set_style_text_color(brand, lv_color_hex(0x60d6ad), 0);
     lv_obj_set_style_text_font(brand, &lv_font_montserrat_24, 0);
     lv_obj_set_width(brand, 640);
@@ -247,6 +277,7 @@ void build_ui()
     g_buffer_bar = lv_bar_create(screen);
     lv_obj_set_size(g_buffer_bar, 8, 620);
     lv_obj_align(g_buffer_bar, LV_ALIGN_LEFT_MID, 6, 0);
+    if (!g_show_buffer_bar.load()) lv_obj_add_flag(g_buffer_bar, LV_OBJ_FLAG_HIDDEN);
     lv_bar_set_range(g_buffer_bar, 0, 100);
     lv_bar_set_value(g_buffer_bar, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(g_buffer_bar, lv_color_hex(0x1b2638), LV_PART_MAIN);
@@ -255,6 +286,7 @@ void build_ui()
     g_volume_bar = lv_bar_create(screen);
     lv_obj_set_size(g_volume_bar, 8, 620);
     lv_obj_align(g_volume_bar, LV_ALIGN_RIGHT_MID, -6, 0);
+    if (!g_show_volume_bar.load()) lv_obj_add_flag(g_volume_bar, LV_OBJ_FLAG_HIDDEN);
     lv_bar_set_range(g_volume_bar, 0, 10);
     lv_bar_set_value(g_volume_bar, g_volume.load(), LV_ANIM_OFF);
     lv_obj_set_style_bg_color(g_volume_bar, lv_color_hex(0x1b2638), LV_PART_MAIN);
@@ -269,6 +301,8 @@ void build_ui()
     add_button(screen, "TUNE", 400, 635, 220, 64, 5);
 
     g_setup_screen = lv_obj_create(screen);
+    lv_obj_add_flag(g_setup_screen, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_setup_screen, dismiss_setup_qr, LV_EVENT_CLICKED, nullptr);
     lv_obj_set_size(g_setup_screen, LV_PCT(100), LV_PCT(100));
     lv_obj_set_pos(g_setup_screen, 0, 0);
     lv_obj_set_style_bg_color(g_setup_screen, lv_color_hex(0x101827), 0);
@@ -279,6 +313,7 @@ void build_ui()
     lv_obj_add_flag(g_setup_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *setup_title = lv_label_create(g_setup_screen);
     g_setup_title = setup_title;
+    lv_obj_remove_flag(setup_title, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_text_color(setup_title, lv_color_hex(0xf4f7fb), 0);
     lv_label_set_text(setup_title, hostname_copy().c_str());
     lv_obj_set_width(setup_title, 640);
@@ -287,6 +322,7 @@ void build_ui()
     lv_obj_set_style_text_font(setup_title, &lv_font_montserrat_40, 0);
     lv_obj_align(setup_title, LV_ALIGN_TOP_MID, 0, 50);
     g_setup_qr = lv_qrcode_create(g_setup_screen);
+    lv_obj_remove_flag(g_setup_qr, LV_OBJ_FLAG_CLICKABLE);
     lv_qrcode_set_size(g_setup_qr, 320);
     lv_qrcode_set_dark_color(g_setup_qr, lv_color_black());
     lv_qrcode_set_light_color(g_setup_qr, lv_color_white());
@@ -298,6 +334,7 @@ void build_ui()
     if (lv_qrcode_update(g_setup_qr, wifi_qr, sizeof(wifi_qr) - 1) != LV_RESULT_OK)
         ESP_LOGE(kTag, "Wi-Fi QR code generation failed");
     g_setup_url = lv_label_create(g_setup_screen);
+    lv_obj_remove_flag(g_setup_url, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_text_color(g_setup_url, lv_color_hex(0xf4f7fb), 0);
     lv_obj_set_width(g_setup_url, 640);
     lv_obj_set_style_text_font(g_setup_url, &lv_font_montserrat_24, 0);

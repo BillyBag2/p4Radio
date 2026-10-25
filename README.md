@@ -143,13 +143,13 @@ The hostname defaults to `p4radio` and is saved as `hostname` in the `p4radio` N
 
 The managed `espressif/mdns` component advertises the hostname and HTTP service on the AP and station interfaces. Open `http://p4radio.local/` (or the saved name) from the same network. The setup web server remains available after joining Wi-Fi. Clients must support mDNS and the network must permit multicast; when connected to the setup AP, `http://192.168.4.1/` is also available.
 
-In AP mode, the display shows a QR code for joining the open `p4Radio-Setup` Wi-Fi network while no clients are associated. Once any client associates, the QR code switches to `http://<hostname>.local/` to open the setup page, with the URL and IP fallback printed below. Disconnecting all AP clients restores the Wi-Fi join QR code and instruction. Successful Wi-Fi provisioning restores the normal radio display. The first QR code joins Wi-Fi; the second QR code opens the setup page.
+In AP mode, the display shows a QR code for joining the open `p4Radio-Setup` Wi-Fi network while no clients are associated. Once any client associates, the QR code switches to `http://<hostname>.local/wifi` to open the setup page, with the URL and IP fallback printed below. Disconnecting all AP clients restores the Wi-Fi join QR code and instruction. Successful Wi-Fi provisioning restores the normal radio display. The first QR code joins Wi-Fi; the second QR code opens the setup page.
 
 After adding these changes, run `idf.py update-dependencies` and `idf.py build` in the configured ESP-IDF terminal to resolve mDNS. `CONFIG_LV_USE_QRCODE=y` enables the LVGL QR widget in existing and fresh configurations.
 
 Wi-Fi joins have a 30-second overall deadline, including DHCP, in addition to the disconnect retry limit. This applies after submitting setup details and at saved-network startup. On timeout, the pending join is disconnected and automatic retries stop; the AP setup/QR screen returns. Submitting revised details starts a fresh deadline. Successful IP acquisition cancels the deadline. A separate watchdog task enforces it even if no disconnect event arrives.
 
-Captive interception code is removed: no wildcard DNS responder, catch-all HTTP route, redirects, or captive-probe endpoints are installed. The setup server matches only `/`, `/api/scan`, `/connect`, `/connecting`, and `/api/connection`; other URLs receive the normal HTTP not-found response. Clients join `p4Radio-Setup`, then scan the hostname URL QR or manually open `http://<hostname>.local/`. The same bookmark works on the home network through mDNS. `http://192.168.4.1/` remains an AP-only fallback. The AP has no internet access.
+Captive interception code is removed: no wildcard DNS responder, catch-all HTTP route, redirects, or captive-probe endpoints are installed. The setup server matches only `/`, `/api/scan`, `/connect`, `/connecting`, `/api/connection`, `/wifi`, and `/settings`; other URLs receive the normal HTTP not-found response. Clients join `p4Radio-Setup`, then scan the hostname URL QR or manually open `http://<hostname>.local/`. The same bookmark works on the home network through mDNS. `http://192.168.4.1/` remains an AP-only fallback. The AP has no internet access.
 
 Successful setup submissions use HTTP 303 to redirect from POST `/connect` to GET `/connecting`. Refreshing that page does not save credentials again or restart the Wi-Fi join deadline.
 
@@ -188,3 +188,25 @@ The Wi-Fi join QR screen uses a dark red background; the setup URL QR screen use
 Run `python tools/convert_connect_sound.py` and `python tools/convert_disconnect_sound.py` to regenerate the 24 kHz mono PCM notification arrays (14,880 samples / 29,760 bytes each). Original WAV files are preserved. Notifications mix over the background effects, with button feedback remaining a separate layer. Notification requests coalesce to the latest event if transitions occur rapidly.
 
 The tuning converter normalizes generated PCM peaks to -1 dBFS (about +11.2 dB gain for the current source). Compression is unnecessary for this asset; mixer attenuation and saturation protection remain. The source WAV is unchanged and the generated array has no clipped samples.
+
+### Web radio settings
+
+Open `http://<hostname>.local/` for radio settings (`/settings` remains an alias). Wi-Fi setup is at `/wifi`; each page links to the other near its top. This form saves independently of Wi-Fi setup and does not restart the connection or stream. It contains the hostname and **Show volume bar** / **Show buffer bar** checkboxes. Both bars default to off when no setting exists; enabling them shows the right volume or left buffer indicator on the next UI refresh. Their values survive normal flashing and power cycles.
+
+Hostnames accept 1-32 ASCII letters/digits with internal hyphens and are normalized to lowercase. Empty names, spaces, dots (including `.local`), leading/trailing hyphens, and other characters are rejected by the firmware as well as the browser. Changes update mDNS and the screen header; update bookmarks after renaming. If an old hostname stops resolving during the save redirect, open the newly named URL (or `http://192.168.4.1/settings` in AP mode).
+
+Settings are saved in the `p4radio` NVS namespace using `hostname` and `display_flags` (bit 0: volume bar, bit 1: buffer bar). Live settings update only after the write/commit succeeds. POST `/settings` redirects to GET `/?saved=1` to prevent refresh resubmissions. Wi-Fi credentials, station, volume level, stream cache, and buffer operation are preserved.
+
+The second setup QR goes directly to `http://<hostname>.local/wifi`, with `http://192.168.4.1/wifi` as its AP-only fallback. Successful Wi-Fi connection returns the browser to the radio-settings home page.
+
+The hostname header is an underlined `http://<hostname>.local/` link. Tapping it plays button feedback and shows a settings URL QR without interrupting playback. Tapping anywhere on the QR screen plays button feedback once and returns to the radio screen. Dismissed automatic setup QR screens remain hidden until the AP/client setup stage changes; the header can always reopen the settings QR from the normal screen. Automatic Wi-Fi QR codes still target `/wifi`.
+
+### Maximum stream bitrate
+
+Radio settings offers Unlimited (default), 24, 32, 48, 64, 96, 128, 160, 192, 256, and 320 kbit/s. The selected maximum is stored as `max_bitrate` in `p4radio` NVS. Saving a changed limit clears stream candidates/cache and retunes; saving other settings does not. A finite ceiling prefers the highest available rate within that ceiling; Unlimited selects the highest available advertised bitrate without a ceiling.
+
+Finite limits exclude directory entries with unknown or excessive advertised rates. BBC candidates include 320 and 128 kbit/s UK endpoints plus 96 and 48 kbit/s worldwide endpoints, filtered by the ceiling. Higher UK endpoints may be unavailable outside the UK. Lower limits than 48 have no BBC fallback. HLS variants must fit the limit using the nominal bitrate encoded in a BBC URL when present, otherwise their advertised average bandwidth/BANDWIDTH. This limits advertised audio rates, not instantaneous network traffic or variable-bitrate peaks. Cache entries are tagged with the limit under which they were qualified, so old unrestricted cache entries cannot bypass a finite limit after reboot. If no eligible stream is available, the radio displays a message and retries; increase the limit to restore more choices.
+
+Stream cache revision 3 invalidates URLs selected by the old always-prefer-96 policy once after flashing. Finite bitrate ceilings now try the highest permitted directory or BBC candidate first, falling through to lower rates on failure.
+
+Cache revision 4 invalidates selections made under the former Unlimited-prefer-96 policy. Unlimited now ranks streams and HLS variants by highest advertised bitrate, including the BBC 320 kbit/s candidates. Displayed bitrate is measured and can differ slightly from the nominal value.

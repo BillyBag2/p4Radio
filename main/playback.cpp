@@ -158,6 +158,12 @@ bool play_stream(const Station &station, int station_index)
     g_download_kbps.store(0);
     set_status((std::string("Loading ") + station.name).c_str());
     const std::string playlist_url = resolve_station_url(station, station_index);
+    if (playlist_url.empty()) {
+        set_status("No streams within bitrate limit; change settings");
+        for (int i = 0; i < 100 && !g_scan_requested.load() && !g_sleep_requested.load() && g_station.load() == station_index; ++i)
+            vTaskDelay(pdMS_TO_TICKS(100));
+        return false;
+    }
     esp_audio_dec_register_default();
     esp_audio_simple_dec_register_default();
     esp_audio_simple_dec_cfg_t decoder_config{};
@@ -200,15 +206,21 @@ bool play_stream(const Station &station, int station_index)
         if (audio.error.load()) { failed = true; break; }
         const TickType_t last_progress = output_task_started ? audio.last_output.load() : last_audio_tick;
         if (xTaskGetTickCount() - last_progress > pdMS_TO_TICKS(30000)) { failed = true; break; }
+        const int limit = g_max_bitrate_kbps.load();
+        if (limit > 0 && stream_url_bitrate(media_url) > limit) {
+            set_status("Stream exceeds bitrate limit");
+            failed = true;
+            break;
+        }
         const std::string playlist = fetch_hls_playlist(media_url);
         std::array<std::string, kMaxHlsSegments> segments{};
         const size_t segment_count = parse_hls_segments(playlist, media_url, segments);
         if (playlist.find("#EXT-X-STREAM-INF:") != std::string::npos && segment_count) {
             if (++playlist_depth > 3) { failed = true; break; }
-            // Pick the advertised variant nearest 96 kbit/s rather than the first one.
+            // Prefer the highest permitted rate; Unlimited applies no ceiling.
             size_t position = 0;
             int best_distance = 2147483647;
-            std::string best = segments.front();
+            std::string best;
             while ((position = playlist.find("#EXT-X-STREAM-INF:", position)) != std::string::npos) {
                 const size_t end = playlist.find('\n', position);
                 if (end == std::string::npos) break;
@@ -220,11 +232,21 @@ bool play_stream(const Station &station, int station_index)
                 const size_t uri_end = playlist.find('\n', end + 1);
                 std::string uri = playlist.substr(end + 1, uri_end == std::string::npos ? uri_end : uri_end - end - 1);
                 if (!uri.empty() && uri.back() == '\r') uri.pop_back();
-                if (rate > 0 && rate < 100000000 && !uri.empty() && uri.front() != '#' && std::abs(rate - 96000L) < best_distance) {
-                    best_distance = static_cast<int>(std::abs(rate - 96000L));
+                const std::string variant_url = make_hls_segment_url(media_url, uri);
+                const int nominal = stream_url_bitrate(variant_url);
+                const bool permitted = limit == 0 || (nominal > 0 ? nominal <= limit : rate > 0 && rate <= limit * 1000L);
+                const long selection_rate = nominal > 0 ? nominal * 1000L : rate;
+                const int score = -static_cast<int>(std::min(selection_rate, 100000000L));
+                if (permitted && rate > 0 && rate < 100000000 && !uri.empty() && uri.front() != '#' && score < best_distance) {
+                    best_distance = score;
                     best = make_hls_segment_url(media_url, uri);
                 }
                 position = end + 1;
+            }
+            if (best.empty()) {
+                set_status("No HLS variant within bitrate limit");
+                failed = true;
+                break;
             }
             media_url = best;
             continue;
@@ -415,7 +437,7 @@ void playback_task(void *)
             esp_err_t result = nvs_open("streams96", NVS_READWRITE, &cache);
             if (result == ESP_OK) {
                 result = nvs_erase_all(cache);
-                if (result == ESP_OK) result = nvs_set_u32(cache, "revision", 2);
+                if (result == ESP_OK) result = nvs_set_u32(cache, "revision", 4);
                 if (result == ESP_OK) result = nvs_commit(cache);
                 nvs_close(cache);
             }

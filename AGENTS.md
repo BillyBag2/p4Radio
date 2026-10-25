@@ -65,7 +65,12 @@ do not claim a successful build or install/replace the user's setup implicitly.
 
 ## Behavior to preserve
 
-- Stations prefer AAC HLS near 96 kbit/s, with BBC worldwide 96 kbit/s fallbacks.
+- Finite bitrate ceilings prefer the highest permitted AAC HLS rate. Unlimited
+  selects the highest available rate without a ceiling. BBC candidates include UK 128/320 kbit/s
+  and worldwide 48/96 kbit/s variants.
+  Respect the NVS-backed maximum bitrate for directory entries, cache and HLS
+  variants; lower caps can select the 48 kbit/s BBC fallback. Never silently
+  exceed a finite cap. Unlimited also selects the highest available rate.
   The player supports unencrypted AAC in MPEG-TS and basic master playlists;
   enabled decoder libraries do not imply support for other stream containers.
 - Decoding/download and speaker output run concurrently. PCM capacity is twenty
@@ -74,7 +79,8 @@ do not claim a successful build or install/replace the user's setup implicitly.
   within +/-1000 ppm, with a smoothed ten-second target and 9-11 second dead
   band. Preserve the interpolation phase across blocks and reset on refill. Keep PSRAM buffers
   out of task stacks and preserve cancellation/join-before-free ordering.
-- Volume is 1-10. The right-edge bar shows volume; the left-edge bar shows buffer fill and there is no
+- Volume is 1-10. The optional right-edge bar shows volume; the optional left-edge bar shows buffer fill.
+  Both default off and are configured at `/` (`/settings` alias), persisted in NVS. There is no
   numeric volume label. Station buttons are `<`/`>` and volume buttons `-`/`+`.
 - OFF is awake idle, not deep sleep: backlight off, Wi-Fi and touch polling
   active. The touch interrupt is not wired to an MCU wake pin. A wake tap must
@@ -86,7 +92,7 @@ do not claim a successful build or install/replace the user's setup implicitly.
   setup; successful IP acquisition cancels the deadline.
 - Default hostname is `p4radio`, saved in NVS and advertised by mDNS on AP/LAN.
   Keep the bookmark `http://<hostname>.local/` usable in both modes.
-- AP setup first shows a Wi-Fi join QR, then a hostname URL QR after a client
+- AP setup first shows a Wi-Fi join QR, then a hostname `/wifi` URL QR after a client
   associates. Submission returns to the normal display. Captive interception
   is intentionally removed: do not add wildcard DNS, probe routes, or redirects.
 - Setup POST uses HTTP 303 to GET `/connecting`. Its busy page waits three
