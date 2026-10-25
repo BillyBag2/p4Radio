@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <cmath>
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -17,7 +18,12 @@ lv_obj_t *g_setup_url = nullptr;
 lv_obj_t *g_setup_title = nullptr;
 lv_obj_t *g_status_label = nullptr;
 lv_obj_t *g_volume_bar = nullptr;
-lv_obj_t *g_rates_label = nullptr;
+lv_obj_t *g_buffer_bar = nullptr;
+lv_obj_t *g_bandwidth_needle = nullptr;
+constexpr int kMeterWidth = 280;
+constexpr int kMeterHeight = 28;
+constexpr int kNeedleWidth = 4;
+constexpr int kMeterMargin = 12;
 
 void wake_on_tap(lv_event_t *)
 {
@@ -78,6 +84,10 @@ lv_obj_t *add_button(lv_obj_t *parent, const char *caption, int x, int y, int wi
     lv_obj_set_size(button, width, height);
     lv_obj_set_pos(button, x, y);
     lv_obj_set_style_bg_color(button, lv_color_hex(action == 4 ? 0x9a4b53 : 0x287b71), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(action == 4 ? 0x461d24 : 0x103e38), LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(button, lv_color_white(), 0);
+    lv_obj_set_style_border_width(button, 2, 0);
+    lv_obj_set_style_border_opa(button, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(button, 18, 0);
     lv_obj_add_event_cb(button, radio_button, LV_EVENT_CLICKED, reinterpret_cast<void *>(action));
     lv_obj_t *label = lv_label_create(button);
@@ -127,19 +137,33 @@ void refresh_ui(lv_timer_t *)
     }
     if (g_station_label) lv_label_set_text(g_station_label, kStations[g_station.load()].name);
     if (g_status_label) {
-        const std::string text = status_copy();
+        std::string text = status_copy();
+        if (text.rfind("Playing ", 0) == 0) {
+            const int bitrate = g_stream_kbps.load();
+            const int channels = g_stream_channels.load();
+            text += " - " + (bitrate > 0 ? std::to_string(bitrate) : std::string("--")) + " kbit/s";
+            text += channels == 1 ? " - mono" : channels == 2 ? " - stereo" : " - --";
+        }
         lv_label_set_text(g_status_label, text.c_str());
     }
+    if (g_buffer_bar) {
+        const int fill = g_buffer_percent.load();
+        lv_bar_set_value(g_buffer_bar, fill, LV_ANIM_OFF);
+        const int low_threshold = 100 / kAudioBufferSeconds; // One second remaining.
+        lv_obj_set_style_bg_color(g_buffer_bar, lv_color_hex(fill < low_threshold ? 0xffa020 : 0x309cff), LV_PART_INDICATOR);
+    }
     if (g_volume_bar) lv_bar_set_value(g_volume_bar, g_volume.load(), LV_ANIM_OFF);
-    if (g_rates_label) {
-        char rates[100];
+    if (g_bandwidth_needle) {
         const int stream = g_stream_kbps.load();
-        const int wifi = g_connected.load() && esp_timer_get_time() - g_download_time.load() < 15000000 ? g_download_kbps.load() : 0;
-        char a[16], b[16];
-        if (stream > 0) std::snprintf(a, sizeof(a), "%d", stream); else std::snprintf(a, sizeof(a), "--");
-        if (wifi > 0) std::snprintf(b, sizeof(b), "%d", wifi); else std::snprintf(b, sizeof(b), "--");
-        std::snprintf(rates, sizeof(rates), "STREAM %s kbit/s | Wi-Fi RX %s kbit/s", a, b);
-        lv_label_set_text(g_rates_label, rates);
+        const int wifi = g_download_kbps.load();
+        const bool fresh = g_connected.load() &&
+            esp_timer_get_time() - g_download_time.load() < 15000000;
+        float value = -3.0f;
+        if (fresh && stream > 0 && wifi > 0)
+            value = std::clamp(std::log2(static_cast<float>(wifi) / stream), -3.0f, 3.0f);
+        const int travel = kMeterWidth - 2 * kMeterMargin - kNeedleWidth;
+        const int x = kMeterMargin + static_cast<int>(std::lround((value + 3.0f) / 6.0f * travel));
+        lv_obj_set_x(g_bandwidth_needle, x);
     }
 
 }
@@ -182,10 +206,51 @@ void build_ui()
     lv_obj_set_style_text_align(g_status_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(g_status_label, LV_ALIGN_TOP_MID, 0, 230);
 
-    g_rates_label = lv_label_create(screen);
-    lv_obj_set_style_text_font(g_rates_label, &lv_font_montserrat_24, 0);
-    lv_label_set_text(g_rates_label, "STREAM -- kbit/s | Wi-Fi RX -- kbit/s");
-    lv_obj_align(g_rates_label, LV_ALIGN_TOP_MID, 0, 280);
+    // Ratio meter: red below parity, green above parity. No numeric scale.
+    lv_obj_t *meter = lv_obj_create(screen);
+    lv_obj_remove_style_all(meter);
+    lv_obj_set_size(meter, kMeterWidth, kMeterHeight);
+    lv_obj_align(meter, LV_ALIGN_TOP_MID, 0, 280);
+    lv_obj_remove_flag(meter, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(meter, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_color(meter, lv_color_hex(0xff2020), 0);
+    lv_obj_set_style_bg_opa(meter, LV_OPA_COVER, 0);
+    lv_obj_t *green = lv_obj_create(meter);
+    lv_obj_remove_style_all(green);
+    lv_obj_set_size(green, kMeterWidth / 2, kMeterHeight);
+    lv_obj_set_pos(green, kMeterWidth / 2, 0);
+    lv_obj_set_style_bg_color(green, lv_color_hex(0x20ef40), 0);
+    lv_obj_set_style_bg_opa(green, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(green, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(green, LV_OBJ_FLAG_CLICKABLE);
+    g_bandwidth_needle = lv_obj_create(meter);
+    lv_obj_remove_style_all(g_bandwidth_needle);
+    lv_obj_set_size(g_bandwidth_needle, kNeedleWidth, kMeterHeight);
+    lv_obj_set_pos(g_bandwidth_needle, kMeterMargin, 0);
+    lv_obj_set_style_bg_color(g_bandwidth_needle, lv_color_hex(0x18202c), 0);
+    lv_obj_set_style_bg_opa(g_bandwidth_needle, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(g_bandwidth_needle, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(g_bandwidth_needle, LV_OBJ_FLAG_CLICKABLE);
+
+    // Draw the outline above both colored halves and the needle without
+    // changing the content dimensions used to position the needle.
+    lv_obj_t *meter_border = lv_obj_create(meter);
+    lv_obj_remove_style_all(meter_border);
+    lv_obj_set_size(meter_border, kMeterWidth, kMeterHeight);
+    lv_obj_set_pos(meter_border, 0, 0);
+    lv_obj_set_style_border_color(meter_border, lv_color_white(), 0);
+    lv_obj_set_style_border_width(meter_border, 2, 0);
+    lv_obj_set_style_border_opa(meter_border, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(meter_border, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(meter_border, LV_OBJ_FLAG_CLICKABLE);
+
+    g_buffer_bar = lv_bar_create(screen);
+    lv_obj_set_size(g_buffer_bar, 8, 620);
+    lv_obj_align(g_buffer_bar, LV_ALIGN_LEFT_MID, 6, 0);
+    lv_bar_set_range(g_buffer_bar, 0, 100);
+    lv_bar_set_value(g_buffer_bar, 0, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(g_buffer_bar, lv_color_hex(0x1b2638), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(g_buffer_bar, lv_color_hex(0x309cff), LV_PART_INDICATOR);
 
     g_volume_bar = lv_bar_create(screen);
     lv_obj_set_size(g_volume_bar, 8, 620);
@@ -200,8 +265,8 @@ void build_ui()
     add_button(screen, "-", 100, 485, 200, 95, 2);
     add_button(screen, "+", 420, 485, 200, 95, 3);
 
-    add_button(screen, "STOP", 100, 635, 220, 64, 4);
-    add_button(screen, "SCAN", 400, 635, 220, 64, 5);
+    add_button(screen, "OFF", 100, 635, 220, 64, 4);
+    add_button(screen, "TUNE", 400, 635, 220, 64, 5);
 
     g_setup_screen = lv_obj_create(screen);
     lv_obj_set_size(g_setup_screen, LV_PCT(100), LV_PCT(100));
