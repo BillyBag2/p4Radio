@@ -1,4 +1,5 @@
-idf_component_register(SRCS "main.cpp"
+idf_component_register(SRCS "main.cpp" "radio_state.cpp" "settings.cpp" "network.cpp"
+                         "streams.cpp" "playback.cpp" "display.cpp" "button_audio.cpp"
                     INCLUDE_DIRS "."
                     REQUIRES esp_wifi esp_event esp_netif esp_http_server esp_http_client nvs_flash esp_timer driver mbedtls esp_codec_dev esp_audio_codec esp32_p4_wifi6_touch_lcd_4b esp_wifi_remote esp_hosted)
 

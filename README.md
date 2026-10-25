@@ -21,6 +21,27 @@ password and continue.
 
 ---
 
+## TODO
+
+- [ ] Set hostname.
+- [ ] Beep when waking from dormant.
+- [ ] Different colour to QR codes.
+- [ ] Sounds for QR codes.
+- [ ] Secret hand shake to get to AP mode.
+- [ ] Skins
+- [ ] Circular display support.
+- [ ] Circular display simulation.
+- [ ] Add servers and stations.
+- [ ] list servers and stations.
+- [ ] Disable stations.
+- [ ] Off timers. (Bed Meals)
+- [ ] RTC support.
+- [ ] NTP support.
+- [ ] Set time zone ?]
+
+
+---
+
 ## Requirements
 
 When unable to connect to the wifi network after a period of trying, enable AP
@@ -133,3 +154,35 @@ Captive interception code is removed: no wildcard DNS responder, catch-all HTTP 
 Successful setup submissions use HTTP 303 to redirect from POST `/connect` to GET `/connecting`. Refreshing that page does not save credentials again or restart the Wi-Fi join deadline.
 
 The connecting page shows a busy indicator, waits three seconds, then polls `/api/connection` once per second after each response. It navigates to `/` using GET only once Wi-Fi is connected, and shows a retry message if the join fails. Unreachable requests leave the page open and retry. A manual return link is available. If the setup AP closes on a successful join, reconnect the phone to the home network to reach the bookmarked hostname URL.
+
+### Firmware source layout
+
+- `main/main.cpp`: NVS initialization, cache migration, and startup orchestration.
+- `main/radio.hpp` and `main/radio_state.cpp`: shared constants, interfaces, and state.
+- `main/settings.cpp`: saved preferences, hostname validation, and status helpers.
+- `main/network.cpp`: Wi-Fi lifecycle, join timeout, mDNS, and setup HTTP pages.
+- `main/streams.cpp`: stream discovery/cache, HTTP fetches, HLS parsing, and MPEG-TS extraction.
+- `main/playback.cpp`: AAC decoding, PSRAM buffering, speaker task, and playback lifecycle.
+- `main/display.cpp`: LVGL layout, QR setup display, controls, and tap-to-resume.
+
+### Button feedback
+
+`assets/sounds/button.wav` is preserved unchanged. Run `python tools/convert_button_sound.py` to regenerate `main/button_sound_data.hpp`: a 24 kHz mono, signed 16-bit PCM array (1,560 samples / 3,120 bytes). The converter uses a windowed-sinc low-pass resampler and short endpoint fades; Python standard library only.
+
+Button clicks and the wake tap request feedback without blocking the LVGL handler. During radio playback the sound is interpolated to the output sample rate and mixed into 16-bit PCM, with brief radio attenuation and clipping protection. A small task handles feedback when no radio audio is playing, including buffering periods. Speaker writes/open/close operations are serialized; STOP/SCAN/station transitions finish pending feedback before closing the codec. Rapid requests coalesce or restart the effect instead of building an unbounded queue.
+
+UI button callbacks queue preference saves for a separate low-priority task and volume updates for audio processing. They do not wait for the speaker mutex, codec writes, or NVS commits. The audio task uses a short speaker-lock timeout and retries without blocking LVGL. Click requests wake it immediately. Preference writes are coalesced until 500 ms after the last button change; a sudden power loss during that interval can lose the most recent selection.
+
+### Wi-Fi connection sound
+
+`assets/sounds/data-24.wav` is converted by `python tools/convert_data_sound.py` to `main/data_sound_data.hpp` (24 kHz mono signed 16-bit PCM, 48,000 samples / 96,000 bytes). The original WAV is unchanged. The data sound loops at half sample amplitude while attempting to join saved Wi-Fi, including reconnects and joins submitted through setup, until an IP address is obtained or the join fails/times out. STOP suppresses it. Button feedback mixes over this layer. Loop playback uses the existing speaker task and mutex, without blocking UI callbacks or adding a decoder instance.
+
+### Stream tuning sound
+
+`assets/sounds/radio-tuning.wav` is preserved and converted by `python tools/convert_tuning_sound.py` from 44.1 kHz mono to `main/tuning_sound_data.hpp`: 24 kHz signed 16-bit PCM, 120,000 samples / 240,000 bytes. It loops at half amplitude during stream lookup, loading, initial buffering, and underrun refill. It stops when buffered playback starts, the attempt fails, or playback is stopped. Wi-Fi connection feedback takes priority if the network is reconnecting; button clicks layer over either background effect. No extra runtime decoder is required.
+
+### Setup QR feedback
+
+The Wi-Fi join QR screen uses a dark red background; the setup URL QR screen uses dark amber. QR modules remain black on white for scanning and text stays near-white. Entering either QR stage plays `disconnect.wav` once, including switching stages or returning after a failed join; the regular UI refresh does not retrigger it. Accepting new Wi-Fi details while setup is displayed dismisses the QR and requests `connect.wav`. This acknowledges saving/submitting details, not successful Wi-Fi association.
+
+Run `python tools/convert_connect_sound.py` and `python tools/convert_disconnect_sound.py` to regenerate the 24 kHz mono PCM notification arrays (14,880 samples / 29,760 bytes each). Original WAV files are preserved. Notifications mix over the background effects, with button feedback remaining a separate layer. Notification requests coalesce to the latest event if transitions occur rapidly.
