@@ -3,6 +3,8 @@
 #include "button_sound_data.hpp"
 #include "data_sound_data.hpp"
 #include "tuning_sound_data.hpp"
+#include "connect_sound_data.hpp"
+#include "disconnect_sound_data.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cstring>
@@ -15,6 +17,12 @@ namespace {
 StaticSemaphore_t mutex_state;
 SemaphoreHandle_t speaker_mutex = nullptr;
 std::atomic<bool> pending{false};
+std::atomic<int> notification_pending{0};
+std::atomic<bool> notification_active{false};
+const int16_t *notification_samples = nullptr;
+size_t notification_count = 0;
+uint64_t notification_position = 0;
+bool notification_needed() { return notification_pending.load() != 0 || notification_active.load(); }
 std::atomic<bool> preferences_dirty{false};
 std::atomic<TickType_t> preferences_changed_at{0};
 TaskHandle_t click_task_handle = nullptr;
@@ -41,6 +49,13 @@ constexpr size_t count = sizeof(kButtonSound) / sizeof(kButtonSound[0]);
 void render(uint8_t *pcm, size_t bytes)
 {
     if (pending.exchange(false)) position = 0;
+    const int notification = notification_pending.exchange(0);
+    if (notification) {
+        notification_samples = notification == 1 ? kConnectSound : kDisconnectSound;
+        notification_count = notification == 1 ? sizeof(kConnectSound) / sizeof(kConnectSound[0]) : sizeof(kDisconnectSound) / sizeof(kDisconnectSound[0]);
+        notification_position = 0;
+        notification_active.store(true);
+    }
     if (sample_bits != 16 || !channels || !sample_rate) return;
     const uint64_t step = (24000ULL << 16) / sample_rate;
     const size_t frames = bytes / (channels * sizeof(int16_t));
@@ -65,6 +80,21 @@ void render(uint8_t *pcm, size_t bytes)
             }
             data_position = (data_position + step) % (loop_count * 65536ULL);
         }
+        if (notification_active.load()) {
+            const size_t index = notification_position >> 16;
+            const int fraction = notification_position & 65535;
+            const int value = notification_samples[index] + static_cast<int64_t>(
+                notification_samples[std::min(index + 1, notification_count - 1)] - notification_samples[index]) * fraction / 65536;
+            for (size_t ch = 0; ch < channels; ++ch) {
+                const size_t offset = (frame * channels + ch) * sizeof(int16_t);
+                int16_t original;
+                std::memcpy(&original, pcm + offset, sizeof(original));
+                const int16_t mixed = std::clamp<int>(original / 2 + value, -32768, 32767);
+                std::memcpy(pcm + offset, &mixed, sizeof(mixed));
+            }
+            notification_position += step;
+            if ((notification_position >> 16) >= notification_count) notification_active.store(false);
+        }
         if ((position >> 16) >= count) continue;
         const size_t index = position >> 16;
         const int fraction = position & 65535;
@@ -86,7 +116,7 @@ bool finish_click()
 {
     int16_t silence[256];
     bool wrote_audio = false;
-    while (pending.load() || (position >> 16) < count) {
+    while (pending.load() || (position >> 16) < count || notification_needed()) {
         std::memset(silence, 0, sizeof(silence));
         render(reinterpret_cast<uint8_t *>(silence), sizeof(silence));
         if (sample_bits != 16 || esp_codec_dev_write(g_speaker, silence, sizeof(silence)) != ESP_CODEC_DEV_OK) {
@@ -116,7 +146,7 @@ void click_task(void *)
     int16_t loop_pcm[2048];
     while (true) {
         // Never make LVGL wait for a DMA write or codec operation.
-        const bool connecting = wifi_join_in_progress() || tuning_in_progress();
+        const bool connecting = wifi_join_in_progress() || tuning_in_progress() || notification_needed();
         if (pending.load() || volume_dirty.load() || connecting) {
             if (xSemaphoreTake(speaker_mutex, pdMS_TO_TICKS(5)) != pdTRUE) {
                 vTaskDelay(pdMS_TO_TICKS(10));
@@ -175,6 +205,16 @@ void request_preferences_save()
     volume_dirty.store(true);
     preferences_changed_at.store(xTaskGetTickCount());
     preferences_dirty.store(true);
+    if (click_task_handle) xTaskNotifyGive(click_task_handle);
+}
+void request_connect_sound()
+{
+    notification_pending.store(1);
+    if (click_task_handle) xTaskNotifyGive(click_task_handle);
+}
+void request_disconnect_sound()
+{
+    notification_pending.store(2);
     if (click_task_handle) xTaskNotifyGive(click_task_handle);
 }
 void set_stream_loading_sound(bool loading) { stream_loading.store(loading); }

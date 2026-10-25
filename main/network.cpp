@@ -1,4 +1,5 @@
 #include "radio.hpp"
+#include "button_audio.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -182,7 +183,9 @@ esp_err_t connect_network(httpd_req_t *request)
     portEXIT_CRITICAL(&g_status_mux);
     apply_hostname();
     save_wifi_credentials(ssid.c_str(), password.c_str());
+    const bool dismissing_qr = g_portal_active.load() && !g_setup_submitted.load();
     g_setup_submitted.store(true);
+    if (dismissing_qr) request_connect_sound();
     // Post/Redirect/Get: refresh must never repeat credential writes or joins.
     httpd_resp_set_status(request, "303 See Other");
     httpd_resp_set_hdr(request, "Location", "/connecting");

@@ -92,6 +92,7 @@ void refresh_ui(lv_timer_t *)
     const std::string hostname = hostname_copy();
     if (g_hostname_label) lv_label_set_text(g_hostname_label, hostname.c_str());
     if (g_setup_title) lv_label_set_text(g_setup_title, hostname.c_str());
+    static int previous_qr_stage = 0;
     if (g_setup_screen) {
         if (g_portal_active.load() && !g_setup_submitted.load()) {
             lv_obj_remove_flag(g_setup_screen, LV_OBJ_FLAG_HIDDEN);
@@ -99,6 +100,12 @@ void refresh_ui(lv_timer_t *)
             // Only regenerate when the client state or saved hostname changes.
             static std::string displayed_qr;
             const bool client_connected = g_ap_clients.load() > 0;
+            const int qr_stage = client_connected ? 2 : 1;
+            if (qr_stage != previous_qr_stage) {
+                lv_obj_set_style_bg_color(g_setup_screen, lv_color_hex(client_connected ? 0x4a3008 : 0x480f18), 0);
+                if (!g_sleep_requested.load()) request_disconnect_sound();
+                previous_qr_stage = qr_stage;
+            }
             const std::string qr_payload = client_connected ? "http://" + hostname + ".local/" :
                 "WIFI:T:nopass;S:p4Radio-Setup;;";
             if (qr_payload != displayed_qr) {
@@ -113,7 +120,10 @@ void refresh_ui(lv_timer_t *)
                 lv_obj_remove_flag(g_setup_qr, LV_OBJ_FLAG_HIDDEN);
                 lv_label_set_text(g_setup_url, ("Scan to open http://" + hostname + ".local/\n\nOr http://192.168.4.1/").c_str());
             }
-        } else lv_obj_add_flag(g_setup_screen, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(g_setup_screen, LV_OBJ_FLAG_HIDDEN);
+            previous_qr_stage = 0;
+        }
     }
     if (g_station_label) lv_label_set_text(g_station_label, kStations[g_station.load()].name);
     if (g_status_label) {

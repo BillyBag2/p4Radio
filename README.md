@@ -34,7 +34,7 @@ password and continue.
 - [ ] Add servers and stations.
 - [ ] list servers and stations.
 - [ ] Disable stations.
-- [ ] Off timers.
+- [ ] Off timers. (Bed Meals)
 - [ ] RTC support.
 - [ ] NTP support.
 - [ ] Set time zone ?]
@@ -180,3 +180,9 @@ UI button callbacks queue preference saves for a separate low-priority task and 
 ### Stream tuning sound
 
 `assets/sounds/radio-tuning.wav` is preserved and converted by `python tools/convert_tuning_sound.py` from 44.1 kHz mono to `main/tuning_sound_data.hpp`: 24 kHz signed 16-bit PCM, 120,000 samples / 240,000 bytes. It loops at half amplitude during stream lookup, loading, initial buffering, and underrun refill. It stops when buffered playback starts, the attempt fails, or playback is stopped. Wi-Fi connection feedback takes priority if the network is reconnecting; button clicks layer over either background effect. No extra runtime decoder is required.
+
+### Setup QR feedback
+
+The Wi-Fi join QR screen uses a dark red background; the setup URL QR screen uses dark amber. QR modules remain black on white for scanning and text stays near-white. Entering either QR stage plays `disconnect.wav` once, including switching stages or returning after a failed join; the regular UI refresh does not retrigger it. Accepting new Wi-Fi details while setup is displayed dismisses the QR and requests `connect.wav`. This acknowledges saving/submitting details, not successful Wi-Fi association.
+
+Run `python tools/convert_connect_sound.py` and `python tools/convert_disconnect_sound.py` to regenerate the 24 kHz mono PCM notification arrays (14,880 samples / 29,760 bytes each). Original WAV files are preserved. Notifications mix over the background effects, with button feedback remaining a separate layer. Notification requests coalesce to the latest event if transitions occur rapidly.
