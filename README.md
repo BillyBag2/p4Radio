@@ -212,3 +212,7 @@ Stream cache revision 3 invalidates URLs selected by the old always-prefer-96 po
 Cache revision 4 invalidates selections made under the former Unlimited-prefer-96 policy. Unlimited now ranks streams and HLS variants by highest advertised bitrate, including the BBC 320 kbit/s candidates. Displayed bitrate is measured and can differ slightly from the nominal value.
 
 **Show power meter** on the radio settings page controls the horizontal Wi-Fi/stream ratio meter. It defaults off, applies immediately after saving, and persists in bit 2 of the NVS `display_flags` value. Existing volume and buffer visibility settings are preserved.
+
+### Main screen layout
+
+The 720 x 720 radio screen groups the large station controls under **STATION** and the volume controls under **VOLUME**. All button columns align and are 284 pixels wide; primary controls are 112 pixels tall, while OFF/TUNE are 76 pixels tall with clear spacing. Captions and the station title use a 48-pixel font. The status uses a brighter 24-pixel font and reads `Playing - <bitrate> kbit/s - mono/stereo`, avoiding repetition of the station title. The optional power meter sits above the control groups; optional side bars and the underlined hostname QR link retain their behavior.

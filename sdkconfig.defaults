@@ -25,6 +25,7 @@ CONFIG_AUDIO_DECODER_AAC_SUPPORT=y
 # Fonts referenced by the radio UI.
 CONFIG_LV_FONT_MONTSERRAT_24=y
 CONFIG_LV_FONT_MONTSERRAT_40=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
 
 # Reserve room for a full LVGL radio UI and the ESP-IDF audio components.
 CONFIG_PARTITION_TABLE_CUSTOM=y
