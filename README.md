@@ -28,9 +28,8 @@ password and continue.
 - [ ] Different colour to QR codes.
 - [ ] Sounds for QR codes.
 - [ ] Secret hand shake to get to AP mode.
-- [ ] Skins
-- [ ] Circular display support.
-- [ ] Circular display simulation.
+- [x] Statically compiled display skins.
+- [x] Circular layout and simulation on the square display.
 - [ ] Add servers and stations.
 - [ ] list servers and stations.
 - [ ] Disable stations.
@@ -109,6 +108,45 @@ The first configure/build resolves the pinned components from the ESP Component 
 
 ## ESP-IDF configuration
 
+### Display skins
+
+Open `http://<hostname>.local/` and choose **Display skin** on the Radio
+settings page, then save. Both skins are compiled into the firmware. The choice
+applies within the next display refresh (up to half a second), is stored in NVS,
+and survives reboot without reflashing or interrupting playback.
+
+**Square** retains the existing layout. **Circular** fits the interface into a
+720-pixel-diameter circle, with black, inactive corners on the square panel.
+It keeps volume above station controls, with matching 236 x 100 pixel buttons
+fully inside the curved edge and their symbols centered. The optional
+volume and buffer indicators become shorter bars near the sides. QR setup
+screens and OFF/tap wake use the same circular boundary; switching preserves
+the current QR/dismissal and wake state.
+
+With LVGL's default built-in allocator, first use of the circular skin adds a
+3 MB PSRAM pool for clipping layers. The pool and each skin's widget tree stay
+allocated for reuse; repeated switches do not keep allocating new screens.
+`CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=3072` allows LVGL's TLSF allocator
+to accept this pool. It is set in `sdkconfig.defaults`; existing configurations
+also need this value in their active `sdkconfig` (menuconfig: Component config >
+LVGL configuration > Memory Settings). A compile-time check rejects a pool
+limit too small for the circular skin, rather than silently keeping Square.
+The audio buffer keeps its existing capacity. A different physical panel
+still needs its own BSP/driver.
+
+For a radio with no saved skin preference, **p4Radio > Default display skin**
+in `idf.py menuconfig` selects the initial choice. Fresh configurations default
+to Square through `CONFIG_P4RADIO_SKIN_SQUARE=y` in `sdkconfig.defaults`.
+
+`DisplaySkin` in `main/display_skin.hpp` owns the widgets and shared radio,
+QR, meter and wake behavior. Each derived skin implements `build_controls()`
+and `arrange_widgets()`; a shaped skin can override `contains_point()` to
+restrict touch input. New skins also need a stable preference ID, a web settings
+option, and a factory used by `main/display.cpp`; compile their sources in
+`main/CMakeLists.txt`.
+
+### Board configuration
+
 The project targets `esp32p4`. [`sdkconfig.defaults`](sdkconfig.defaults) selects the pre-v3 P4 silicon branch for this board's revision 1.3. ESP-IDF does not permit one binary to support both pre-v3 and v3-or-later P4 revisions, so this firmware configuration is for the reported rev 1.x board.
 
 Board specifications: [Waveshare ESP32-P4-WIFI6-Touch-LCD-4B / ETH-2RO documentation](https://docs.waveshare.com/ESP32-P4-WIFI6-Touch-LCD-4B). The 4B documentation covers the shared main board; the ETH-2RO SKU adds the Ethernet/RS485/relay bottom board and omits the camera connector.
@@ -167,7 +205,7 @@ The connecting page shows a busy indicator, waits three seconds, then polls `/ap
 
 ### Button feedback
 
-`assets/sounds/button.wav` is preserved unchanged. Run `python tools/convert_button_sound.py` to regenerate `main/button_sound_data.hpp`: a 24 kHz mono, signed 16-bit PCM array (1,560 samples / 3,120 bytes). The converter uses a windowed-sinc low-pass resampler and short endpoint fades; Python standard library only.
+`assets/sounds/button.wav` is preserved unchanged. Run `python tools/convert_button_sound.py` to regenerate `main/sound_data_button.hpp`: a 24 kHz mono, signed 16-bit PCM array (1,560 samples / 3,120 bytes). The converter uses a windowed-sinc low-pass resampler and short endpoint fades; Python standard library only.
 
 Button clicks and the wake tap request feedback without blocking the LVGL handler. During radio playback the sound is interpolated to the output sample rate and mixed into 16-bit PCM, with brief radio attenuation and clipping protection. A small task handles feedback when no radio audio is playing, including buffering periods. Speaker writes/open/close operations are serialized; OFF/TUNE/station transitions finish pending feedback before closing the codec. Rapid requests coalesce or restart the effect instead of building an unbounded queue.
 
@@ -175,11 +213,11 @@ UI button callbacks queue preference saves for a separate low-priority task and 
 
 ### Wi-Fi connection sound
 
-`assets/sounds/data-24.wav` is converted by `python tools/convert_data_sound.py` to `main/data_sound_data.hpp` (24 kHz mono signed 16-bit PCM, 48,000 samples / 96,000 bytes). The original WAV is unchanged. The data sound loops at half sample amplitude while attempting to join saved Wi-Fi, including reconnects and joins submitted through setup, until an IP address is obtained or the join fails/times out. OFF suppresses it. Button feedback mixes over this layer. Loop playback uses the existing speaker task and mutex, without blocking UI callbacks or adding a decoder instance.
+`assets/sounds/data-24.wav` is converted by `python tools/convert_data_sound.py` to `main/sound_data_data.hpp` (24 kHz mono signed 16-bit PCM, 48,000 samples / 96,000 bytes). The original WAV is unchanged. The data sound loops at half sample amplitude while attempting to join saved Wi-Fi, including reconnects and joins submitted through setup, until an IP address is obtained or the join fails/times out. OFF suppresses it. Button feedback mixes over this layer. Loop playback uses the existing speaker task and mutex, without blocking UI callbacks or adding a decoder instance.
 
 ### Stream tuning sound
 
-`assets/sounds/radio-tuning.wav` is preserved and converted by `python tools/convert_tuning_sound.py` from 44.1 kHz mono to `main/tuning_sound_data.hpp`: 24 kHz signed 16-bit PCM, 120,000 samples / 240,000 bytes. It loops at half amplitude during stream lookup, loading, initial buffering, and underrun refill. It stops when buffered playback starts, the attempt fails, or playback is stopped. Wi-Fi connection feedback takes priority if the network is reconnecting; button clicks layer over either background effect. No extra runtime decoder is required.
+`assets/sounds/radio-tuning.wav` is preserved and converted by `python tools/convert_tuning_sound.py` from 44.1 kHz mono to `main/sound_data_tuning.hpp`: 24 kHz signed 16-bit PCM, 120,000 samples / 240,000 bytes. It loops at half amplitude during stream lookup, loading, initial buffering, and underrun refill. It stops when buffered playback starts, the attempt fails, or playback is stopped. Wi-Fi connection feedback takes priority if the network is reconnecting; button clicks layer over either background effect. No extra runtime decoder is required.
 
 ### Setup QR feedback
 

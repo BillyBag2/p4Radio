@@ -1,0 +1,23 @@
+menu "p4Radio"
+
+    choice P4RADIO_DISPLAY_SKIN
+        prompt "Default display skin"
+        default P4RADIO_SKIN_SQUARE
+        help
+            Initial layout when no skin preference is saved in NVS. Both skins
+            are compiled into the firmware and can be selected in web settings.
+
+        config P4RADIO_SKIN_SQUARE
+            bool "Square (original layout)"
+            select LV_DRAW_SW_COMPLEX if LV_USE_DRAW_SW
+
+        config P4RADIO_SKIN_CIRCULAR
+            bool "Circular (black corners on a square panel)"
+            select LV_DRAW_SW_COMPLEX if LV_USE_DRAW_SW
+            help
+                Keep all content within a 720-pixel-diameter circle. Volume
+                and station buttons fit inside it with centered captions.
+                The area outside the circle is black and ignores touches.
+    endchoice
+
+endmenu

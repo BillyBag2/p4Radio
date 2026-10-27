@@ -86,6 +86,9 @@ void load_preferences()
         g_show_buffer_bar.store((display_flags & 2) != 0);
         g_show_power_meter.store((display_flags & 4) != 0);
     }
+    uint8_t skin = 0;
+    if (nvs_get_u8(nvs, "skin", &skin) == ESP_OK && skin <= static_cast<uint8_t>(DisplaySkinId::Circular))
+        g_display_skin.store(static_cast<DisplaySkinId>(skin));
     size_t name_size = sizeof(g_hostname);
     char name[sizeof(g_hostname)] = {};
     if (nvs_get_str(nvs, "hostname", name, &name_size) == ESP_OK && valid_hostname(name))
@@ -97,15 +100,18 @@ void load_preferences()
     nvs_close(nvs);
 }
 
-esp_err_t save_web_settings(const std::string &hostname, bool volume_bar, bool buffer_bar, int max_bitrate, bool power_meter)
+esp_err_t save_web_settings(const std::string &hostname, bool volume_bar, bool buffer_bar, int max_bitrate,
+                            bool power_meter, DisplaySkinId skin)
 {
-    if (!valid_hostname(hostname) || !valid_max_bitrate(max_bitrate)) return ESP_ERR_INVALID_ARG;
+    if (!valid_hostname(hostname) || !valid_max_bitrate(max_bitrate) ||
+        (skin != DisplaySkinId::Square && skin != DisplaySkinId::Circular)) return ESP_ERR_INVALID_ARG;
     nvs_handle_t handle;
     esp_err_t result = nvs_open("p4radio", NVS_READWRITE, &handle);
     if (result != ESP_OK) return result;
     result = nvs_set_str(handle, "hostname", hostname.c_str());
     if (result == ESP_OK) result = nvs_set_u8(handle, "display_flags", (volume_bar ? 1 : 0) | (buffer_bar ? 2 : 0) | (power_meter ? 4 : 0));
     if (result == ESP_OK) result = nvs_set_i32(handle, "max_bitrate", max_bitrate);
+    if (result == ESP_OK) result = nvs_set_u8(handle, "skin", static_cast<uint8_t>(skin));
     if (result == ESP_OK) result = nvs_commit(handle);
     nvs_close(handle);
     if (result != ESP_OK) return result;
@@ -115,6 +121,8 @@ esp_err_t save_web_settings(const std::string &hostname, bool volume_bar, bool b
     g_show_volume_bar.store(volume_bar);
     g_show_buffer_bar.store(buffer_bar);
     g_show_power_meter.store(power_meter);
+    g_display_skin.store(skin);
+    ESP_LOGI(kTag, "Saved display skin: %s", skin == DisplaySkinId::Circular ? "Circular" : "Square");
     if (g_max_bitrate_kbps.exchange(max_bitrate) != max_bitrate) g_scan_requested.store(true);
     return ESP_OK;
 }

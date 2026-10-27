@@ -27,14 +27,27 @@ disagree, especially around dormant-state wake handling.
 | `main/network.cpp` | Wi-Fi/AP lifecycle, join deadline, mDNS, setup HTTP handlers |
 | `main/streams.cpp` | Radio Browser discovery, URL cache, HTTP, HLS, MPEG-TS extraction |
 | `main/playback.cpp` | AAC decoding, PCM buffering, audio output task, idle/resume lifecycle |
-| `main/display.cpp` | LVGL widgets, buttons, QR setup display, wake tap |
+| `main/display.cpp` | BSP display startup, selected skin and refresh timer |
+| `main/display_skin.cpp`, `.hpp` | Abstract skin base, shared widgets, controls, QR and wake behavior |
+| `main/display_skin_square.cpp`, `display_skin_circular.cpp` | Runtime-selectable compiled layouts; circular clipping and touch boundary |
 | `main/button_audio.cpp`, `.hpp` | Sound layers, speaker serialization, deferred volume/preferences |
-| `main/*_sound_data.hpp` | Generated PCM assets; regenerate rather than hand-edit |
+| `main/sound_data_*.hpp` | Generated PCM assets; regenerate rather than hand-edit |
 | `tools/convert_*_sound.py` | Standard-library Python asset conversion scripts |
 
 Keep new functionality in its owning module; keep `main.cpp` focused on startup.
 Add new compilation units to `main/CMakeLists.txt`. Keep module-private state
 local; add declarations to `radio.hpp` only when another module needs them.
+Both display skins are compiled and selected on the web settings page, saved
+as the `skin` byte in `p4radio` NVS (0 square, 1 circular). Menuconfig's
+`p4Radio > Default display skin` only supplies the initial choice without NVS.
+Keep shared behavior in `DisplaySkin` and layout in derived classes. Switch
+skins only in the LVGL context; retain each widget tree after first use, and
+carry QR dismissal/manual state and the wake overlay across switches. Preserve
+black, inactive corners for the circular skin, including QR and wake overlays.
+The circular skin adds a 3 MB PSRAM pool to LVGL's built-in allocator. Keep
+`CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=3072` in defaults and active config:
+LVGL 9.3 derives its TLSF block limit from the base heap plus this allowance;
+the default 64 KB limit rejects the drawing pool even if PSRAM is available.
 
 ## Build and dependencies
 
@@ -126,7 +139,7 @@ python tools/convert_tuning_sound.py
 
 ## Persistence and verification
 
-`p4radio` NVS stores credentials, hostname, volume, and station selection.
+`p4radio` NVS stores credentials, hostname, volume, station selection, and display preferences including skin.
 `streams96` stores qualified stream URLs and cache revision. Preset cache keys
 refer to slots, so reordering presets requires a deliberate migration. Do not
 erase all NVS to clear stream URLs. Full NVS erase also removes Wi-Fi credentials.
