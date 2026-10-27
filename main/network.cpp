@@ -45,7 +45,7 @@ std::string url_decode(const char *input)
     for (size_t i = 0; input[i] != '\0'; ++i) {
         if (input[i] == '+' ) {
             output.push_back(' ');
-        } else if (input[i] == '%' && std::isxdigit(static_cast<unsigned char>(input[i + 1])) &&
+        } else if (input[i] == '%' && input[i + 1] && input[i + 2] && std::isxdigit(static_cast<unsigned char>(input[i + 1])) &&
                    std::isxdigit(static_cast<unsigned char>(input[i + 2]))) {
             char hex[3] = {input[i + 1], input[i + 2], 0};
             output.push_back(static_cast<char>(std::strtol(hex, nullptr, 16)));
@@ -79,7 +79,7 @@ esp_err_t portal_page(httpd_req_t *request)
 {
     ESP_LOGI(kTag, "Setup page requested: %s", request->uri);
     static constexpr char page[] = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>p4Radio Wi-Fi setup</title><style>
-body{font:17px system-ui;background:#101827;color:#f3f6fb;margin:0;padding:24px}main{max-width:480px;margin:auto;background:#1b2638;padding:24px;border-radius:18px}h1{margin-top:0}label{display:block;margin:16px 0 6px}input,select,button{box-sizing:border-box;width:100%;padding:13px;border:0;border-radius:9px;font:inherit}button{background:#60d6ad;font-weight:700;margin-top:18px}small{color:#a8b7ca}</style></head><body><main><h1>Connect p4Radio</h1><p>Choose your Wi-Fi network and enter its password. Your details stay on this radio.</p><form method="post" action="/connect"><label for="hostname">Host name</label><input id="hostname" name="hostname" maxlength="32" pattern="[a-z0-9]+([a-z0-9-]*[a-z0-9])?" value="HOSTNAME_VALUE" required><small>Open http://&lt;hostname&gt;.local/ on your network.</small><label for="ssid">Wi-Fi network</label><select id="networks" onchange="document.getElementById('ssid').value=this.value"><option value="">Scanning…</option></select><input id="ssid" name="ssid" maxlength="32" placeholder="Network name" required><label for="password">Password</label><input id="password" name="password" type="password" maxlength="64" autocomplete="current-password"><button>Save and connect</button></form><p><small>If the list is empty, type the network name. This open setup network does not provide internet.</small></p></main><script>fetch('/api/scan').then(r=>r.json()).then(a=>{let s=document.getElementById('networks');s.innerHTML='<option value="">Select a network…</option>';a.forEach(n=>{let o=document.createElement('option');o.value=n;o.textContent=n;s.appendChild(o)})}).catch(()=>{});</script></body></html>)HTML";
+body{font:17px system-ui;background:#101827;color:#f3f6fb;margin:0;padding:24px}main{max-width:480px;margin:auto;background:#1b2638;padding:24px;border-radius:18px}h1{margin-top:0}label{display:block;margin:16px 0 6px}input,select,button{box-sizing:border-box;width:100%;padding:13px;border:0;border-radius:9px;font:inherit}button{background:#60d6ad;font-weight:700;margin-top:18px}small{color:#a8b7ca}</style></head><body><main><h1>Connect p4Radio</h1><p><a href="/" style="color:#60d6ad">Radio settings</a></p><p>Choose your Wi-Fi network and enter its password. Your details stay on this radio.</p><form method="post" action="/connect"><label for="hostname">Host name</label><input id="hostname" name="hostname" maxlength="32" pattern="[a-z0-9]+([a-z0-9\-]*[a-z0-9])?" value="HOSTNAME_VALUE" required><small>Open http://&lt;hostname&gt;.local/ on your network.</small><label for="ssid">Wi-Fi network</label><select id="networks" onchange="document.getElementById('ssid').value=this.value"><option value="">Scanning…</option></select><input id="ssid" name="ssid" maxlength="32" placeholder="Network name" required><label for="password">Password</label><input id="password" name="password" type="password" maxlength="64" autocomplete="current-password"><button>Save and connect</button></form><p><small>If the list is empty, type the network name. This open setup network does not provide internet.</small></p></main><script>fetch('/api/scan').then(r=>r.json()).then(a=>{let s=document.getElementById('networks');s.innerHTML='<option value="">Select a network…</option>';a.forEach(n=>{let o=document.createElement('option');o.value=n;o.textContent=n;s.appendChild(o)})}).catch(()=>{});</script></body></html>)HTML";
     httpd_resp_set_type(request, "text/html; charset=utf-8");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     std::string rendered = page;
@@ -198,7 +198,7 @@ esp_err_t connect_network(httpd_req_t *request)
 esp_err_t connecting_page(httpd_req_t *request)
 {
     static constexpr char page[] = R"HTML(<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connecting p4Radio</title><style>
-body{font:17px system-ui;background:#101827;color:#f3f6fb;padding:24px}main{max-width:480px;margin:40px auto;background:#1b2638;padding:24px;border-radius:18px}a{color:#60d6ad}.spinner{width:36px;height:36px;border:4px solid #435269;border-top-color:#60d6ad;border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.spinner{animation:none}}</style></head><body><main aria-busy="true"><div class="spinner" aria-hidden="true"></div><h1>Connecting...</h1><p>Your Wi-Fi details are saved. Please wait while the radio connects.</p><p id="progress" role="status">Waiting for the radio to reconnect...</p><p>The setup network closes after a successful connection. Rejoin your usual Wi-Fi network if necessary, then open the radio's bookmarked hostname URL.</p><p><a href="/">Return now</a></p></main><script>
+body{font:17px system-ui;background:#101827;color:#f3f6fb;padding:24px}main{max-width:480px;margin:40px auto;background:#1b2638;padding:24px;border-radius:18px}a{color:#60d6ad}.spinner{width:36px;height:36px;border:4px solid #435269;border-top-color:#60d6ad;border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.spinner{animation:none}}</style></head><body><main aria-busy="true"><div class="spinner" aria-hidden="true"></div><h1>Connecting...</h1><p>Your Wi-Fi details are saved. Please wait while the radio connects.</p><p id="progress" role="status">Waiting for the radio to reconnect...</p><p>The setup network closes after a successful connection. Rejoin your usual Wi-Fi network if necessary, then open the radio's bookmarked hostname URL.</p><p><a href="/wifi">Return to Wi-Fi settings</a></p></main><script>
 const progress=document.getElementById('progress');
 async function checkConnection(){
   try{
@@ -229,6 +229,71 @@ esp_err_t connection_state(httpd_req_t *request)
     return httpd_resp_send(request, body, HTTPD_RESP_USE_STRLEN);
 }
 
+esp_err_t settings_page(httpd_req_t *request)
+{
+    static constexpr char page[] = R"HTML(<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Radio settings</title><style>
+body{font:17px system-ui;background:#101827;color:#f3f6fb;margin:0;padding:24px}main{max-width:480px;margin:auto;background:#1b2638;padding:24px;border-radius:18px}label{display:block;margin:18px 0 8px}input[type=text],select,button{box-sizing:border-box;width:100%;padding:13px;border:0;border-radius:9px;font:inherit}input[type=checkbox]{width:22px;height:22px;vertical-align:middle;margin-right:10px}button{background:#60d6ad;margin-top:24px;font-weight:bold}a{color:#60d6ad}small{display:block;color:#c4cede;margin-top:8px}</style></head><body><main><h1>Radio settings</h1><p><a href="/wifi">Wi-Fi settings</a></p>SAVED_MESSAGE<form method="post" action="/settings"><label for="hostname">Host name</label><input id="hostname" type="text" name="hostname" value="HOSTNAME_VALUE" minlength="1" maxlength="32" pattern="[a-z0-9]+([a-z0-9\-]*[a-z0-9])?" autocapitalize="none" spellcheck="false" oninput="this.value=this.value.toLowerCase()" required><small>Use 1-32 letters (a-z), digits or hyphens. Start and end with a letter or digit. Do not include .local.</small><label><input type="checkbox" name="volume_bar" value="1" VOLUME_CHECKED>Show volume bar</label><label><input type="checkbox" name="buffer_bar" value="1" BUFFER_CHECKED>Show buffer bar</label><label><input type="checkbox" name="power_meter" value="1" METER_CHECKED>Show power meter</label><label for="max_bitrate">Maximum stream bitrate</label><select id="max_bitrate" name="max_bitrate">BITRATE_OPTIONS</select><small>Limits advertised stream bitrate. Changing this retunes the radio. Lower limits may leave some stations unavailable.</small><button>Save settings</button></form><p>Radio address: <a href="http://HOSTNAME_VALUE.local/">http://HOSTNAME_VALUE.local/</a></p></main></body></html>)HTML";
+    std::string rendered = page;
+    const auto replace_all = [&rendered](const std::string &token, const std::string &value) {
+        size_t position = 0;
+        while ((position = rendered.find(token, position)) != std::string::npos) {
+            rendered.replace(position, token.size(), value);
+            position += value.size();
+        }
+    };
+    std::string options;
+    for (int rate : kStandardBitrates) {
+        options += "<option value=\"" + std::to_string(rate) + "\"" +
+            (rate == g_max_bitrate_kbps.load() ? " selected" : "") + ">" +
+            (rate == 0 ? std::string("Unlimited") : std::to_string(rate) + " kbit/s") + "</option>";
+    }
+    replace_all("BITRATE_OPTIONS", options);
+    replace_all("HOSTNAME_VALUE", hostname_copy());
+    replace_all("VOLUME_CHECKED", g_show_volume_bar.load() ? "checked" : "");
+    replace_all("BUFFER_CHECKED", g_show_buffer_bar.load() ? "checked" : "");
+    replace_all("METER_CHECKED", g_show_power_meter.load() ? "checked" : "");
+    char query[64] = {}, saved[8] = {};
+    const bool saved_ok = httpd_req_get_url_query_str(request, query, sizeof(query)) == ESP_OK &&
+        httpd_query_key_value(query, "saved", saved, sizeof(saved)) == ESP_OK && std::strcmp(saved, "1") == 0;
+    replace_all("SAVED_MESSAGE", saved_ok ? "<p role=\"status\">Settings saved. Update your bookmark if you changed the host name.</p>" : "");
+    httpd_resp_set_type(request, "text/html; charset=utf-8");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    return httpd_resp_send(request, rendered.c_str(), rendered.size());
+}
+
+esp_err_t update_settings(httpd_req_t *request)
+{
+    if (request->content_len <= 0 || request->content_len > 256)
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Invalid settings form");
+    std::string body(static_cast<size_t>(request->content_len), '\0');
+    size_t received = 0;
+    while (received < body.size()) {
+        const int count = httpd_req_recv(request, body.data() + received, body.size() - received);
+        if (count <= 0) return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Incomplete settings form");
+        received += count;
+    }
+    std::string hostname = form_value(body, "hostname");
+    std::transform(hostname.begin(), hostname.end(), hostname.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    const std::string volume = form_value(body, "volume_bar"), buffer = form_value(body, "buffer_bar");
+    const std::string meter = form_value(body, "power_meter");
+    if (!valid_hostname(hostname) || (!meter.empty() && meter != "1") || (!volume.empty() && volume != "1") || (!buffer.empty() && buffer != "1"))
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Use a 1-32 character host name with letters, digits and internal hyphens");
+    const std::string rate_text = form_value(body, "max_bitrate");
+    int max_bitrate = -1;
+    for (int rate : kStandardBitrates) if (rate_text == std::to_string(rate)) max_bitrate = rate;
+    if (max_bitrate < 0) return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Select a standard maximum bitrate");
+    const esp_err_t result = save_web_settings(hostname, volume == "1", buffer == "1", max_bitrate, meter == "1");
+    if (result != ESP_OK) {
+        ESP_LOGE(kTag, "Save web settings: %s", esp_err_to_name(result));
+        return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "Could not save settings");
+    }
+    apply_hostname();
+    httpd_resp_set_status(request, "303 See Other");
+    httpd_resp_set_hdr(request, "Location", "/?saved=1");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    return httpd_resp_send(request, nullptr, 0);
+}
+
 void start_setup_http()
 {
     if (g_http_server) return;
@@ -240,16 +305,22 @@ void start_setup_http()
     config.recv_wait_timeout = 5;
     config.send_wait_timeout = 5;
     ESP_ERROR_CHECK(httpd_start(&g_http_server, &config));
-    const httpd_uri_t root{.uri = "/", .method = HTTP_GET, .handler = portal_page, .user_ctx = nullptr};
+    const httpd_uri_t root{.uri = "/", .method = HTTP_GET, .handler = settings_page, .user_ctx = nullptr};
     const httpd_uri_t scan{.uri = "/api/scan", .method = HTTP_GET, .handler = scan_networks, .user_ctx = nullptr};
     const httpd_uri_t connect{.uri = "/connect", .method = HTTP_POST, .handler = connect_network, .user_ctx = nullptr};
     ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &root));
+    const httpd_uri_t wifi{.uri = "/wifi", .method = HTTP_GET, .handler = portal_page, .user_ctx = nullptr};
+    ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &wifi));
     ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &scan));
     ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &connect));
     const httpd_uri_t connecting{.uri = "/connecting", .method = HTTP_GET, .handler = connecting_page, .user_ctx = nullptr};
     ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &connecting));
     const httpd_uri_t state{.uri = "/api/connection", .method = HTTP_GET, .handler = connection_state, .user_ctx = nullptr};
     ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &state));
+    const httpd_uri_t settings_get{.uri = "/settings", .method = HTTP_GET, .handler = settings_page, .user_ctx = nullptr};
+    const httpd_uri_t settings_post{.uri = "/settings", .method = HTTP_POST, .handler = update_settings, .user_ctx = nullptr};
+    ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &settings_get));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &settings_post));
 }
 
 void start_portal()

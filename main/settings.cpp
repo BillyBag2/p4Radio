@@ -43,6 +43,11 @@ bool valid_hostname(const std::string &name)
     return true;
 }
 
+bool valid_max_bitrate(int kbps)
+{
+    return std::find(kStandardBitrates.begin(), kStandardBitrates.end(), kbps) != kStandardBitrates.end();
+}
+
 void save_preferences()
 {
     nvs_handle_t nvs;
@@ -72,6 +77,15 @@ void load_preferences()
     {
         g_volume.store(std::clamp<int>(value, kMinVolume, kMaxVolume));
     }
+    int32_t max_bitrate = 0;
+    if (nvs_get_i32(nvs, "max_bitrate", &max_bitrate) == ESP_OK && valid_max_bitrate(max_bitrate))
+        g_max_bitrate_kbps.store(max_bitrate);
+    uint8_t display_flags = 0;
+    if (nvs_get_u8(nvs, "display_flags", &display_flags) == ESP_OK) {
+        g_show_volume_bar.store((display_flags & 1) != 0);
+        g_show_buffer_bar.store((display_flags & 2) != 0);
+        g_show_power_meter.store((display_flags & 4) != 0);
+    }
     size_t name_size = sizeof(g_hostname);
     char name[sizeof(g_hostname)] = {};
     if (nvs_get_str(nvs, "hostname", name, &name_size) == ESP_OK && valid_hostname(name))
@@ -81,6 +95,28 @@ void load_preferences()
     size = sizeof(g_saved_password);
     nvs_get_str(nvs, "password", g_saved_password, &size);
     nvs_close(nvs);
+}
+
+esp_err_t save_web_settings(const std::string &hostname, bool volume_bar, bool buffer_bar, int max_bitrate, bool power_meter)
+{
+    if (!valid_hostname(hostname) || !valid_max_bitrate(max_bitrate)) return ESP_ERR_INVALID_ARG;
+    nvs_handle_t handle;
+    esp_err_t result = nvs_open("p4radio", NVS_READWRITE, &handle);
+    if (result != ESP_OK) return result;
+    result = nvs_set_str(handle, "hostname", hostname.c_str());
+    if (result == ESP_OK) result = nvs_set_u8(handle, "display_flags", (volume_bar ? 1 : 0) | (buffer_bar ? 2 : 0) | (power_meter ? 4 : 0));
+    if (result == ESP_OK) result = nvs_set_i32(handle, "max_bitrate", max_bitrate);
+    if (result == ESP_OK) result = nvs_commit(handle);
+    nvs_close(handle);
+    if (result != ESP_OK) return result;
+    portENTER_CRITICAL(&g_status_mux);
+    std::snprintf(g_hostname, sizeof(g_hostname), "%s", hostname.c_str());
+    portEXIT_CRITICAL(&g_status_mux);
+    g_show_volume_bar.store(volume_bar);
+    g_show_buffer_bar.store(buffer_bar);
+    g_show_power_meter.store(power_meter);
+    if (g_max_bitrate_kbps.exchange(max_bitrate) != max_bitrate) g_scan_requested.store(true);
+    return ESP_OK;
 }
 
 void save_wifi_credentials(const char *ssid, const char *password)

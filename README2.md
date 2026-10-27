@@ -23,7 +23,7 @@ password and continue.
 
 ## TODO
 
-- [ ] Set hostname.
+- [x] Set hostname.
 - [x] Beep when waking from dormant.
 - [x] Different colour to QR codes.
 - [x] Sounds for QR codes.

@@ -27,10 +27,33 @@ std::string read_http_body(esp_http_client_handle_t client, int max_len)
 }
 
 
+int stream_url_bitrate(const std::string &url)
+{
+    // BBC media URLs explicitly identify nominal audio bitrate (not TS overhead).
+    for (const char *marker : {"audio=", "audio%3d", "audio%3D"}) {
+        const size_t position = url.find(marker);
+        if (position != std::string::npos) {
+            const long rate = std::strtol(url.c_str() + position + std::strlen(marker), nullptr, 10);
+            if (rate > 0 && rate < 10000000) return static_cast<int>((rate + 999) / 1000);
+        }
+    }
+    return 0;
+}
+
 std::string cached_stream(int index)
 {
     nvs_handle_t handle;
     if (nvs_open("streams96", NVS_READONLY, &handle) != ESP_OK) return {};
+    const int limit = g_max_bitrate_kbps.load();
+    if (limit > 0) {
+        char cap_key[16];
+        std::snprintf(cap_key, sizeof(cap_key), "cap%d", index);
+        int32_t saved_limit = -1;
+        if (nvs_get_i32(handle, cap_key, &saved_limit) != ESP_OK || saved_limit != limit) {
+            nvs_close(handle);
+            return {};
+        }
+    }
     size_t size = 0;
     std::string value;
     char key[16];
@@ -46,12 +69,18 @@ std::string cached_stream(int index)
 
 void cache_stream(int index, const std::string &url)
 {
+    if (!url.empty() && g_scan_requested.load()) return;
     // NVS keys have a 15-character limit; use a separate key per preset below.
     char key[16];
     std::snprintf(key, sizeof(key), "station%d", index);
     nvs_handle_t handle;
     if (nvs_open("streams96", NVS_READWRITE, &handle) != ESP_OK) return;
     esp_err_t result = url.empty() ? nvs_erase_key(handle, key) : nvs_set_str(handle, key, url.c_str());
+    if (result == ESP_OK && !url.empty()) {
+        char cap_key[16];
+        std::snprintf(cap_key, sizeof(cap_key), "cap%d", index);
+        result = nvs_set_i32(handle, cap_key, g_max_bitrate_kbps.load());
+    }
     if (result == ESP_OK) result = nvs_commit(handle);
     if (result != ESP_OK && result != ESP_ERR_NVS_NOT_FOUND) ESP_LOGW(kTag, "Stream cache: %s", esp_err_to_name(result));
     nvs_close(handle);
@@ -89,6 +118,7 @@ esp_http_client_handle_t open_http_get(const std::string &url, int &status_code,
 
 std::string resolve_station_url(const Station &station, int index)
 {
+    const int limit = g_max_bitrate_kbps.load();
     auto &urls = g_candidates[index];
     if (urls.empty()) {
         const std::string saved = cached_stream(index);
@@ -130,24 +160,42 @@ std::string resolve_station_url(const Station &station, int index)
                     std::string(codec->valuestring).find("AAC") == std::string::npos ||
                     !cJSON_IsString(url)) continue;
                 const std::string candidate = url->valuestring;
+                const auto *rate = cJSON_GetObjectItemCaseSensitive(entry, "bitrate");
+                const int kbps = cJSON_IsNumber(rate) ? rate->valueint : 0;
+                if (limit > 0 && (kbps <= 0 || kbps > limit)) continue;
                 if (candidate.size() <= 2047 && (candidate.rfind("https://", 0) == 0 || candidate.rfind("http://", 0) == 0) &&
                     std::find(urls.begin(), urls.end(), candidate) == urls.end()) {
                     urls.push_back(candidate);
-                    const auto *rate = cJSON_GetObjectItemCaseSensitive(entry, "bitrate");
-                    g_url_bitrates[candidate] = cJSON_IsNumber(rate) ? rate->valueint : 0;
+                    g_url_bitrates[candidate] = kbps;
                 }
             }
         }
         cJSON_Delete(root);
         if (!urls.empty()) break;
     }
+    // Include explicit BBC variants so a higher ceiling can select higher
+    // quality even if the directory only lists the worldwide 96 kbit/s feed.
+    for (int bitrate : {320, 128, 96, 48}) {
+        if (limit > 0 && bitrate > limit) continue;
+        std::string fallback = station.playlist_url;
+        const size_t marker = fallback.find("audio=96000");
+        if (marker == std::string::npos) continue;
+        fallback.replace(marker, std::strlen("audio=96000"), "audio=" + std::to_string(bitrate * 1000));
+        if (bitrate > 96) {
+            const size_t host = fallback.find("as-hls-ww-live");
+            if (host != std::string::npos) fallback.replace(host, std::strlen("as-hls-ww-live"), "as-hls-uk-live");
+            const size_t path = fallback.find("/live/ww/");
+            if (path != std::string::npos) fallback.replace(path, std::strlen("/live/ww/"), "/live/uk/");
+        }
+        if (std::find(urls.begin(), urls.end(), fallback) == urls.end()) urls.push_back(fallback);
+        g_url_bitrates[fallback] = bitrate;
+    }
     std::stable_sort(urls.begin(), urls.end(), [](const std::string &a, const std::string &b) {
         const int ar = g_url_bitrates[a], br = g_url_bitrates[b];
-        return (ar > 0 ? std::abs(ar - 96) : 1000000) < (br > 0 ? std::abs(br - 96) : 1000000);
+        return ar > br; // Highest available rate, including Unlimited.
     });
-    if (std::find(urls.begin(), urls.end(), station.playlist_url) == urls.end()) urls.push_back(station.playlist_url);
     ESP_LOGI(kTag, "%s: trying %u stream candidates", station.name, static_cast<unsigned>(urls.size()));
-    return urls.front();
+    return urls.empty() ? std::string{} : urls.front();
 }
 
 std::string fetch_hls_playlist(const std::string &url)

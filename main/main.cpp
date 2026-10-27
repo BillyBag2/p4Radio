@@ -20,9 +20,9 @@ extern "C" void app_main(void)
     nvs_handle_t cache;
     if (nvs_open("streams96", NVS_READWRITE, &cache) == ESP_OK) {
         uint32_t revision = 0;
-        if (nvs_get_u32(cache, "revision", &revision) != ESP_OK || revision != 2) {
+        if (nvs_get_u32(cache, "revision", &revision) != ESP_OK || revision != 4) {
             esp_err_t result = nvs_erase_all(cache);
-            if (result == ESP_OK) result = nvs_set_u32(cache, "revision", 2);
+            if (result == ESP_OK) result = nvs_set_u32(cache, "revision", 4);
             if (result == ESP_OK) result = nvs_commit(cache);
             ESP_LOGI(kTag, "Stream cache reset: %s", esp_err_to_name(result));
         }

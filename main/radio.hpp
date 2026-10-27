@@ -43,7 +43,14 @@ inline constexpr std::array<Station, kStationCount> kStations{{
 inline constexpr int64_t kJoinTimeoutUs = 30000000; // Association and DHCP.
 
 extern std::atomic<int> g_station;
+inline constexpr std::array<int, 11> kStandardBitrates{{0, 24, 32, 48, 64, 96, 128, 160, 192, 256, 320}};
+bool valid_max_bitrate(int kbps);
+int stream_url_bitrate(const std::string &url);
+extern std::atomic<int> g_max_bitrate_kbps;
 extern std::atomic<int> g_volume;
+extern std::atomic<bool> g_show_volume_bar;
+extern std::atomic<bool> g_show_buffer_bar;
+extern std::atomic<bool> g_show_power_meter;
 extern std::atomic<bool> g_connected;
 extern std::atomic<bool> g_internet_probe_pending;
 extern std::atomic<bool> g_portal_active;
@@ -73,6 +80,7 @@ std::string status_copy();
 std::string hostname_copy();
 bool valid_hostname(const std::string &name);
 void save_preferences();
+esp_err_t save_web_settings(const std::string &hostname, bool volume_bar, bool buffer_bar, int max_bitrate, bool power_meter);
 void load_preferences();
 void save_wifi_credentials(const char *ssid, const char *password);
 bool ensure_network_stack();
