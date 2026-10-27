@@ -117,10 +117,18 @@ lv_obj_t *add_button(lv_obj_t *parent, const char *caption, int x, int y, int wi
     lv_obj_set_style_border_width(button, 2, 0);
     lv_obj_set_style_border_opa(button, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(button, 18, 0);
+    lv_obj_set_style_pad_all(button, 8, 0);
     lv_obj_add_event_cb(button, radio_button, LV_EVENT_CLICKED, reinterpret_cast<void *>(action));
     lv_obj_t *label = lv_label_create(button);
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_40, 0);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_48, 0);
     lv_label_set_text(label, caption);
+    if (action >= 0 && action <= 3) {
+        // LVGL scale 256 is 1x: enlarge only station/volume symbols to 2x.
+        lv_obj_set_style_transform_pivot_x(label, LV_PCT(50), 0);
+        lv_obj_set_style_transform_pivot_y(label, LV_PCT(50), 0);
+        lv_obj_set_style_transform_scale_x(label, 512, 0);
+        lv_obj_set_style_transform_scale_y(label, 512, 0);
+    }
     lv_obj_center(label);
     return button;
 }
@@ -161,6 +169,7 @@ void refresh_ui(lv_timer_t *)
     if (g_status_label) {
         std::string text = status_copy();
         if (text.rfind("Playing ", 0) == 0) {
+            text = "Playing"; // The large station title already identifies the station.
             const int bitrate = g_stream_kbps.load();
             const int channels = g_stream_channels.load();
             text += " - " + (bitrate > 0 ? std::to_string(bitrate) : std::string("--")) + " kbit/s";
@@ -224,22 +233,23 @@ void build_ui()
     lv_obj_set_width(brand, 640);
     lv_obj_set_style_text_align(brand, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(brand, LV_LABEL_LONG_DOT);
-    lv_obj_align(brand, LV_ALIGN_TOP_MID, 0, 40);
+    lv_obj_align(brand, LV_ALIGN_TOP_MID, 0, 26);
 
     g_station_label = lv_label_create(screen);
     lv_label_set_text(g_station_label, kStations[g_station.load()].name);
-    lv_obj_set_style_text_font(g_station_label, &lv_font_montserrat_40, 0);
+    lv_obj_set_style_text_font(g_station_label, &lv_font_montserrat_48, 0);
     lv_obj_set_width(g_station_label, 650);
     lv_obj_set_style_text_align(g_station_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(g_station_label, LV_LABEL_LONG_DOT);
-    lv_obj_align(g_station_label, LV_ALIGN_TOP_MID, 0, 145);
+    lv_obj_align(g_station_label, LV_ALIGN_TOP_MID, 0, 102);
 
     g_status_label = lv_label_create(screen);
     lv_label_set_text(g_status_label, "Starting radio");
-    lv_obj_set_style_text_color(g_status_label, lv_color_hex(0xa9b8ca), 0);
+    lv_obj_set_style_text_color(g_status_label, lv_color_hex(0xc9d4e2), 0);
+    lv_obj_set_style_text_font(g_status_label, &lv_font_montserrat_24, 0);
     lv_obj_set_width(g_status_label, 650);
     lv_obj_set_style_text_align(g_status_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(g_status_label, LV_ALIGN_TOP_MID, 0, 230);
+    lv_obj_align(g_status_label, LV_ALIGN_TOP_MID, 0, 170);
 
     // Ratio meter: red below parity, green above parity. No numeric scale.
     lv_obj_t *meter = lv_obj_create(screen);
@@ -247,7 +257,7 @@ void build_ui()
     if (!g_show_power_meter.load()) lv_obj_add_flag(meter, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_style_all(meter);
     lv_obj_set_size(meter, kMeterWidth, kMeterHeight);
-    lv_obj_align(meter, LV_ALIGN_TOP_MID, 0, 280);
+    lv_obj_align(meter, LV_ALIGN_TOP_MID, 0, 234);
     lv_obj_remove_flag(meter, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(meter, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_color(meter, lv_color_hex(0xff2020), 0);
@@ -299,13 +309,22 @@ void build_ui()
     lv_obj_set_style_bg_color(g_volume_bar, lv_color_hex(0x1b2638), LV_PART_MAIN);
     lv_obj_set_style_bg_color(g_volume_bar, lv_color_hex(0x60d6ad), LV_PART_INDICATOR);
 
-    add_button(screen, "<", 100, 330, 200, 110, 0);
-    add_button(screen, ">", 420, 330, 200, 110, 1);
-    add_button(screen, "-", 100, 485, 200, 95, 2);
-    add_button(screen, "+", 420, 485, 200, 95, 3);
-
-    add_button(screen, "OFF", 100, 635, 220, 64, 4);
-    add_button(screen, "TUNE", 400, 635, 220, 64, 5);
+    // Two clearly labelled primary control groups, followed by secondary actions.
+    const auto group_label = [screen](const char *caption, int y) {
+        lv_obj_t *label = lv_label_create(screen);
+        lv_label_set_text(label, caption);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_color(label, lv_color_hex(0xc9d4e2), 0);
+        lv_obj_align(label, LV_ALIGN_TOP_MID, 0, y);
+    };
+    group_label("VOLUME", 278);
+    add_button(screen, "-", 52, 314, 284, 112, 2);
+    add_button(screen, "+", 384, 314, 284, 112, 3);
+    group_label("STATION", 444);
+    add_button(screen, "<", 52, 480, 284, 112, 0);
+    add_button(screen, ">", 384, 480, 284, 112, 1);
+    add_button(screen, "OFF", 52, 620, 284, 76, 4);
+    add_button(screen, "TUNE", 384, 620, 284, 76, 5);
 
     g_setup_screen = lv_obj_create(screen);
     lv_obj_add_flag(g_setup_screen, LV_OBJ_FLAG_CLICKABLE);
