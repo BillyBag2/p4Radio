@@ -84,6 +84,7 @@ void load_preferences()
     if (nvs_get_u8(nvs, "display_flags", &display_flags) == ESP_OK) {
         g_show_volume_bar.store((display_flags & 1) != 0);
         g_show_buffer_bar.store((display_flags & 2) != 0);
+        g_show_power_meter.store((display_flags & 4) != 0);
     }
     size_t name_size = sizeof(g_hostname);
     char name[sizeof(g_hostname)] = {};
@@ -96,14 +97,14 @@ void load_preferences()
     nvs_close(nvs);
 }
 
-esp_err_t save_web_settings(const std::string &hostname, bool volume_bar, bool buffer_bar, int max_bitrate)
+esp_err_t save_web_settings(const std::string &hostname, bool volume_bar, bool buffer_bar, int max_bitrate, bool power_meter)
 {
     if (!valid_hostname(hostname) || !valid_max_bitrate(max_bitrate)) return ESP_ERR_INVALID_ARG;
     nvs_handle_t handle;
     esp_err_t result = nvs_open("p4radio", NVS_READWRITE, &handle);
     if (result != ESP_OK) return result;
     result = nvs_set_str(handle, "hostname", hostname.c_str());
-    if (result == ESP_OK) result = nvs_set_u8(handle, "display_flags", (volume_bar ? 1 : 0) | (buffer_bar ? 2 : 0));
+    if (result == ESP_OK) result = nvs_set_u8(handle, "display_flags", (volume_bar ? 1 : 0) | (buffer_bar ? 2 : 0) | (power_meter ? 4 : 0));
     if (result == ESP_OK) result = nvs_set_i32(handle, "max_bitrate", max_bitrate);
     if (result == ESP_OK) result = nvs_commit(handle);
     nvs_close(handle);
@@ -113,6 +114,7 @@ esp_err_t save_web_settings(const std::string &hostname, bool volume_bar, bool b
     portEXIT_CRITICAL(&g_status_mux);
     g_show_volume_bar.store(volume_bar);
     g_show_buffer_bar.store(buffer_bar);
+    g_show_power_meter.store(power_meter);
     if (g_max_bitrate_kbps.exchange(max_bitrate) != max_bitrate) g_scan_requested.store(true);
     return ESP_OK;
 }

@@ -210,3 +210,5 @@ Finite limits exclude directory entries with unknown or excessive advertised rat
 Stream cache revision 3 invalidates URLs selected by the old always-prefer-96 policy once after flashing. Finite bitrate ceilings now try the highest permitted directory or BBC candidate first, falling through to lower rates on failure.
 
 Cache revision 4 invalidates selections made under the former Unlimited-prefer-96 policy. Unlimited now ranks streams and HLS variants by highest advertised bitrate, including the BBC 320 kbit/s candidates. Displayed bitrate is measured and can differ slightly from the nominal value.
+
+**Show power meter** on the radio settings page controls the horizontal Wi-Fi/stream ratio meter. It defaults off, applies immediately after saving, and persists in bit 2 of the NVS `display_flags` value. Existing volume and buffer visibility settings are preserved.

@@ -20,6 +20,7 @@ lv_obj_t *g_status_label = nullptr;
 lv_obj_t *g_volume_bar = nullptr;
 lv_obj_t *g_buffer_bar = nullptr;
 lv_obj_t *g_bandwidth_needle = nullptr;
+lv_obj_t *g_power_meter = nullptr;
 namespace {
 bool manual_settings_qr = false;
 bool automatic_qr_dismissed = false;
@@ -180,6 +181,10 @@ void refresh_ui(lv_timer_t *)
         else lv_obj_add_flag(g_volume_bar, LV_OBJ_FLAG_HIDDEN);
         lv_bar_set_value(g_volume_bar, g_volume.load(), LV_ANIM_OFF);
     }
+    if (g_power_meter) {
+        if (g_show_power_meter.load()) lv_obj_remove_flag(g_power_meter, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(g_power_meter, LV_OBJ_FLAG_HIDDEN);
+    }
     if (g_bandwidth_needle) {
         const int stream = g_stream_kbps.load();
         const int wifi = g_download_kbps.load();
@@ -238,6 +243,8 @@ void build_ui()
 
     // Ratio meter: red below parity, green above parity. No numeric scale.
     lv_obj_t *meter = lv_obj_create(screen);
+    g_power_meter = meter;
+    if (!g_show_power_meter.load()) lv_obj_add_flag(meter, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_style_all(meter);
     lv_obj_set_size(meter, kMeterWidth, kMeterHeight);
     lv_obj_align(meter, LV_ALIGN_TOP_MID, 0, 280);

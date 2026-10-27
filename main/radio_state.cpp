@@ -7,6 +7,7 @@ std::atomic<int> g_volume{5};
 std::atomic<int> g_max_bitrate_kbps{0};
 std::atomic<bool> g_show_volume_bar{false};
 std::atomic<bool> g_show_buffer_bar{false};
+std::atomic<bool> g_show_power_meter{false};
 std::atomic<bool> g_connected{false};
 std::atomic<bool> g_internet_probe_pending{false};
 std::atomic<bool> g_portal_active{false};

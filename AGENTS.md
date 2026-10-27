@@ -80,7 +80,9 @@ do not claim a successful build or install/replace the user's setup implicitly.
   band. Preserve the interpolation phase across blocks and reset on refill. Keep PSRAM buffers
   out of task stacks and preserve cancellation/join-before-free ordering.
 - Volume is 1-10. The optional right-edge bar shows volume; the optional left-edge bar shows buffer fill.
-  Both default off and are configured at `/` (`/settings` alias), persisted in NVS. There is no
+  Both default off and are configured at `/` (`/settings` alias), persisted in NVS.
+  The horizontal power/ratio meter is independently optional and defaults off
+  (`display_flags` bit 2); preserve the other display flag bits when saving. There is no
   numeric volume label. Station buttons are `<`/`>` and volume buttons `-`/`+`.
 - OFF is awake idle, not deep sleep: backlight off, Wi-Fi and touch polling
   active. The touch interrupt is not wired to an MCU wake pin. A wake tap must
