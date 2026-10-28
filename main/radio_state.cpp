@@ -8,6 +8,13 @@ std::atomic<int> g_max_bitrate_kbps{0};
 std::atomic<bool> g_show_volume_bar{false};
 std::atomic<bool> g_show_buffer_bar{false};
 std::atomic<bool> g_show_power_meter{false};
+#if CONFIG_P4RADIO_SKIN_RETRO
+std::atomic<DisplaySkinId> g_display_skin{DisplaySkinId::Retro};
+#elif CONFIG_P4RADIO_SKIN_CIRCULAR
+std::atomic<DisplaySkinId> g_display_skin{DisplaySkinId::Circular};
+#else
+std::atomic<DisplaySkinId> g_display_skin{DisplaySkinId::Square};
+#endif
 std::atomic<bool> g_connected{false};
 std::atomic<bool> g_internet_probe_pending{false};
 std::atomic<bool> g_portal_active{false};

@@ -51,6 +51,17 @@ extern std::atomic<int> g_volume;
 extern std::atomic<bool> g_show_volume_bar;
 extern std::atomic<bool> g_show_buffer_bar;
 extern std::atomic<bool> g_show_power_meter;
+// Persisted IDs: never reorder or reuse these values.
+enum class DisplaySkinId : uint8_t { Square = 0, Circular = 1, Retro = 2 };
+struct DisplaySkinOption { DisplaySkinId id; const char *value; const char *name; };
+inline constexpr std::array<DisplaySkinOption, 3> kDisplaySkins{{
+    {DisplaySkinId::Square, "square", "Square"},
+    {DisplaySkinId::Circular, "circular", "Circular"},
+    {DisplaySkinId::Retro, "retro", "Retro"},
+}};
+bool valid_display_skin(DisplaySkinId skin);
+const char *display_skin_name(DisplaySkinId skin);
+extern std::atomic<DisplaySkinId> g_display_skin;
 extern std::atomic<bool> g_connected;
 extern std::atomic<bool> g_internet_probe_pending;
 extern std::atomic<bool> g_portal_active;
@@ -80,7 +91,8 @@ std::string status_copy();
 std::string hostname_copy();
 bool valid_hostname(const std::string &name);
 void save_preferences();
-esp_err_t save_web_settings(const std::string &hostname, bool volume_bar, bool buffer_bar, int max_bitrate, bool power_meter);
+esp_err_t save_web_settings(const std::string &hostname, bool volume_bar, bool buffer_bar, int max_bitrate,
+                            bool power_meter, DisplaySkinId skin);
 void load_preferences();
 void save_wifi_credentials(const char *ssid, const char *password);
 bool ensure_network_stack();
