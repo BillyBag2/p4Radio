@@ -28,7 +28,7 @@ CONFIG_LV_FONT_MONTSERRAT_40=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
 
 # LVGL sizes its TLSF block limit from the base heap plus this allowance.
-# Permit the circular skin's separately allocated 3 MB PSRAM drawing pool.
+# Permit the shared Circular/Retro 3 MB PSRAM drawing pool.
 CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=3072
 
 # Initial display layout; web settings save the user's choice in NVS.

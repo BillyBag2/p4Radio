@@ -51,7 +51,16 @@ extern std::atomic<int> g_volume;
 extern std::atomic<bool> g_show_volume_bar;
 extern std::atomic<bool> g_show_buffer_bar;
 extern std::atomic<bool> g_show_power_meter;
-enum class DisplaySkinId : uint8_t { Square = 0, Circular = 1 };
+// Persisted IDs: never reorder or reuse these values.
+enum class DisplaySkinId : uint8_t { Square = 0, Circular = 1, Retro = 2 };
+struct DisplaySkinOption { DisplaySkinId id; const char *value; const char *name; };
+inline constexpr std::array<DisplaySkinOption, 3> kDisplaySkins{{
+    {DisplaySkinId::Square, "square", "Square"},
+    {DisplaySkinId::Circular, "circular", "Circular"},
+    {DisplaySkinId::Retro, "retro", "Retro"},
+}};
+bool valid_display_skin(DisplaySkinId skin);
+const char *display_skin_name(DisplaySkinId skin);
 extern std::atomic<DisplaySkinId> g_display_skin;
 extern std::atomic<bool> g_connected;
 extern std::atomic<bool> g_internet_probe_pending;

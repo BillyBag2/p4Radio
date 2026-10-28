@@ -162,8 +162,9 @@ The connecting page shows a busy indicator, waits three seconds, then polls `/ap
 - `main/streams.cpp`: stream discovery/cache, HTTP fetches, HLS parsing, and MPEG-TS extraction.
 - `main/playback.cpp`: AAC decoding, PSRAM buffering, speaker task, and playback lifecycle.
 - `main/display.cpp`: BSP startup and the selected skin's refresh timer.
+- `main/display_skin_retro.cpp`: square Retro layout with procedural cloth, a walnut cabinet, Bakelite-style controls and a station dial pointer. Retro is selected in web settings and saved as skin ID 2 in NVS.
 - `main/display_skin.cpp` / `.hpp`: abstract skin base, shared widgets, QR display, controls and tap-to-resume.
-- `main/display_skin_square.cpp` / `display_skin_circular.cpp`: compiled layouts, selected live from the web settings page and saved in NVS. Menuconfig > **p4Radio > Default display skin** supplies the initial choice only. Fresh configurations default to Square. Circular clips all screens into a 720-pixel circle with black, inactive corners; it adds a 3 MB PSRAM pool for clipping with the default LVGL allocator. See [Display skins](README.md#display-skins).
+- `main/display_skin_square.cpp` / `display_skin_circular.cpp`: compiled layouts, selected live from the web settings page and saved in NVS. Menuconfig > **p4Radio > Default display skin** supplies the initial choice only. Fresh configurations default to Square. Circular clips all screens into a 720-pixel circle with black, inactive corners; it shares a 3 MB PSRAM drawing pool with Retro when using the default LVGL allocator. See [Display skins](README.md#display-skins).
 
 ### Button feedback
 

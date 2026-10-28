@@ -16,7 +16,8 @@ void refresh_display(lv_timer_t *)
     if (!attempted_skin || requested != last_requested_skin) {
         attempted_skin = true;
         last_requested_skin = requested;
-        DisplaySkin &next = requested == DisplaySkinId::Circular ? circular_display_skin() : square_display_skin();
+        DisplaySkin &next = requested == DisplaySkinId::Retro ? retro_display_skin() :
+            requested == DisplaySkinId::Circular ? circular_display_skin() : square_display_skin();
         if (&next != active_skin) {
             if (next.activate(lv_screen_active(), active_skin)) {
                 if (active_skin) {

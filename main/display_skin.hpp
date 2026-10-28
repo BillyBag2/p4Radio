@@ -25,6 +25,11 @@ protected:
     virtual void build_controls() = 0;
     virtual void arrange_widgets() = 0;
     virtual bool contains_point(const lv_point_t &) const { return true; }
+    virtual void refresh_theme() {}
+    // A single lifetime PSRAM pool is shared by skins needing larger draw tasks.
+    static bool prepare_drawing_pool();
+    uint32_t buffer_color_ = 0x309cff;
+    uint32_t buffer_low_color_ = 0xffa020;
 
     enum class Action { PreviousStation, NextStation, VolumeDown, VolumeUp, Off, Tune, Count };
     enum class CaptionAlignment { Center, Left, Right };
@@ -73,5 +78,6 @@ private:
 
 DisplaySkin &square_display_skin();
 DisplaySkin &circular_display_skin();
+DisplaySkin &retro_display_skin();
 
 } // namespace p4radio

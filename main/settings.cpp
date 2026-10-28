@@ -48,6 +48,18 @@ bool valid_max_bitrate(int kbps)
     return std::find(kStandardBitrates.begin(), kStandardBitrates.end(), kbps) != kStandardBitrates.end();
 }
 
+bool valid_display_skin(DisplaySkinId skin)
+{
+    return std::any_of(kDisplaySkins.begin(), kDisplaySkins.end(),
+                       [skin](const auto &option) { return option.id == skin; });
+}
+
+const char *display_skin_name(DisplaySkinId skin)
+{
+    for (const auto &option : kDisplaySkins) if (option.id == skin) return option.name;
+    return "Unknown";
+}
+
 void save_preferences()
 {
     nvs_handle_t nvs;
@@ -87,7 +99,7 @@ void load_preferences()
         g_show_power_meter.store((display_flags & 4) != 0);
     }
     uint8_t skin = 0;
-    if (nvs_get_u8(nvs, "skin", &skin) == ESP_OK && skin <= static_cast<uint8_t>(DisplaySkinId::Circular))
+    if (nvs_get_u8(nvs, "skin", &skin) == ESP_OK && valid_display_skin(static_cast<DisplaySkinId>(skin)))
         g_display_skin.store(static_cast<DisplaySkinId>(skin));
     size_t name_size = sizeof(g_hostname);
     char name[sizeof(g_hostname)] = {};
@@ -104,7 +116,7 @@ esp_err_t save_web_settings(const std::string &hostname, bool volume_bar, bool b
                             bool power_meter, DisplaySkinId skin)
 {
     if (!valid_hostname(hostname) || !valid_max_bitrate(max_bitrate) ||
-        (skin != DisplaySkinId::Square && skin != DisplaySkinId::Circular)) return ESP_ERR_INVALID_ARG;
+        !valid_display_skin(skin)) return ESP_ERR_INVALID_ARG;
     nvs_handle_t handle;
     esp_err_t result = nvs_open("p4radio", NVS_READWRITE, &handle);
     if (result != ESP_OK) return result;
@@ -122,7 +134,7 @@ esp_err_t save_web_settings(const std::string &hostname, bool volume_bar, bool b
     g_show_buffer_bar.store(buffer_bar);
     g_show_power_meter.store(power_meter);
     g_display_skin.store(skin);
-    ESP_LOGI(kTag, "Saved display skin: %s", skin == DisplaySkinId::Circular ? "Circular" : "Square");
+    ESP_LOGI(kTag, "Saved display skin: %s", display_skin_name(skin));
     if (g_max_bitrate_kbps.exchange(max_bitrate) != max_bitrate) g_scan_requested.store(true);
     return ESP_OK;
 }

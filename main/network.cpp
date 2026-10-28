@@ -232,7 +232,7 @@ esp_err_t connection_state(httpd_req_t *request)
 esp_err_t settings_page(httpd_req_t *request)
 {
     static constexpr char page[] = R"HTML(<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Radio settings</title><style>
-body{font:17px system-ui;background:#101827;color:#f3f6fb;margin:0;padding:24px}main{max-width:480px;margin:auto;background:#1b2638;padding:24px;border-radius:18px}label{display:block;margin:18px 0 8px}input[type=text],select,button{box-sizing:border-box;width:100%;padding:13px;border:0;border-radius:9px;font:inherit}input[type=checkbox]{width:22px;height:22px;vertical-align:middle;margin-right:10px}button{background:#60d6ad;margin-top:24px;font-weight:bold}a{color:#60d6ad}small{display:block;color:#c4cede;margin-top:8px}</style></head><body><main><h1>Radio settings</h1><p><a href="/wifi">Wi-Fi settings</a></p>SAVED_MESSAGE<form method="post" action="/settings"><label for="hostname">Host name</label><input id="hostname" type="text" name="hostname" value="HOSTNAME_VALUE" minlength="1" maxlength="32" pattern="[a-z0-9]+([a-z0-9\-]*[a-z0-9])?" autocapitalize="none" spellcheck="false" oninput="this.value=this.value.toLowerCase()" required><small>Use 1-32 letters (a-z), digits or hyphens. Start and end with a letter or digit. Do not include .local.</small><label for="skin">Display skin</label><select id="skin" name="skin"><option value="square" SQUARE_SELECTED>Square</option><option value="circular" CIRCULAR_SELECTED>Circular</option></select><small>Changes the screen layout immediately and remembers your choice.</small><label><input type="checkbox" name="volume_bar" value="1" VOLUME_CHECKED>Show volume bar</label><label><input type="checkbox" name="buffer_bar" value="1" BUFFER_CHECKED>Show buffer bar</label><label><input type="checkbox" name="power_meter" value="1" METER_CHECKED>Show power meter</label><label for="max_bitrate">Maximum stream bitrate</label><select id="max_bitrate" name="max_bitrate">BITRATE_OPTIONS</select><small>Limits advertised stream bitrate. Changing this retunes the radio. Lower limits may leave some stations unavailable.</small><button>Save settings</button></form><p>Radio address: <a href="http://HOSTNAME_VALUE.local/">http://HOSTNAME_VALUE.local/</a></p></main></body></html>)HTML";
+body{font:17px system-ui;background:#101827;color:#f3f6fb;margin:0;padding:24px}main{max-width:480px;margin:auto;background:#1b2638;padding:24px;border-radius:18px}label{display:block;margin:18px 0 8px}input[type=text],select,button{box-sizing:border-box;width:100%;padding:13px;border:0;border-radius:9px;font:inherit}input[type=checkbox]{width:22px;height:22px;vertical-align:middle;margin-right:10px}button{background:#60d6ad;margin-top:24px;font-weight:bold}a{color:#60d6ad}small{display:block;color:#c4cede;margin-top:8px}</style></head><body><main><h1>Radio settings</h1><p><a href="/wifi">Wi-Fi settings</a></p>SAVED_MESSAGE<form method="post" action="/settings"><label for="hostname">Host name</label><input id="hostname" type="text" name="hostname" value="HOSTNAME_VALUE" minlength="1" maxlength="32" pattern="[a-z0-9]+([a-z0-9\-]*[a-z0-9])?" autocapitalize="none" spellcheck="false" oninput="this.value=this.value.toLowerCase()" required><small>Use 1-32 letters (a-z), digits or hyphens. Start and end with a letter or digit. Do not include .local.</small><label for="skin">Display skin</label><select id="skin" name="skin">SKIN_OPTIONS</select><small>Changes the screen layout immediately and remembers your choice.</small><label><input type="checkbox" name="volume_bar" value="1" VOLUME_CHECKED>Show volume bar</label><label><input type="checkbox" name="buffer_bar" value="1" BUFFER_CHECKED>Show buffer bar</label><label><input type="checkbox" name="power_meter" value="1" METER_CHECKED>Show power meter</label><label for="max_bitrate">Maximum stream bitrate</label><select id="max_bitrate" name="max_bitrate">BITRATE_OPTIONS</select><small>Limits advertised stream bitrate. Changing this retunes the radio. Lower limits may leave some stations unavailable.</small><button>Save settings</button></form><p>Radio address: <a href="http://HOSTNAME_VALUE.local/">http://HOSTNAME_VALUE.local/</a></p></main></body></html>)HTML";
     std::string rendered = page;
     const auto replace_all = [&rendered](const std::string &token, const std::string &value) {
         size_t position = 0;
@@ -253,8 +253,12 @@ body{font:17px system-ui;background:#101827;color:#f3f6fb;margin:0;padding:24px}
     replace_all("BUFFER_CHECKED", g_show_buffer_bar.load() ? "checked" : "");
     replace_all("METER_CHECKED", g_show_power_meter.load() ? "checked" : "");
     const DisplaySkinId skin = g_display_skin.load();
-    replace_all("SQUARE_SELECTED", skin == DisplaySkinId::Square ? "selected" : "");
-    replace_all("CIRCULAR_SELECTED", skin == DisplaySkinId::Circular ? "selected" : "");
+    std::string skin_options;
+    for (const auto &option : kDisplaySkins) {
+        skin_options += std::string("<option value=\"") + option.value + "\"" +
+            (skin == option.id ? " selected" : "") + ">" + option.name + "</option>";
+    }
+    replace_all("SKIN_OPTIONS", skin_options);
     char query[64] = {}, saved[8] = {};
     const bool saved_ok = httpd_req_get_url_query_str(request, query, sizeof(query)) == ESP_OK &&
         httpd_query_key_value(query, "saved", saved, sizeof(saved)) == ESP_OK && std::strcmp(saved, "1") == 0;
@@ -286,9 +290,13 @@ esp_err_t update_settings(httpd_req_t *request)
     for (int rate : kStandardBitrates) if (rate_text == std::to_string(rate)) max_bitrate = rate;
     if (max_bitrate < 0) return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Select a standard maximum bitrate");
     const std::string skin_text = form_value(body, "skin");
-    if (skin_text != "square" && skin_text != "circular")
-        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Select Square or Circular display skin");
-    const DisplaySkinId skin = skin_text == "circular" ? DisplaySkinId::Circular : DisplaySkinId::Square;
+    DisplaySkinId skin = DisplaySkinId::Square;
+    bool found_skin = false;
+    for (const auto &option : kDisplaySkins) {
+        if (skin_text == option.value) { skin = option.id; found_skin = true; break; }
+    }
+    if (!found_skin)
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Select a valid display skin");
     const esp_err_t result = save_web_settings(hostname, volume == "1", buffer == "1", max_bitrate, meter == "1", skin);
     if (result != ESP_OK) {
         ESP_LOGE(kTag, "Save web settings: %s", esp_err_to_name(result));

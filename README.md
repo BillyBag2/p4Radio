@@ -111,7 +111,7 @@ The first configure/build resolves the pinned components from the ESP Component 
 ### Display skins
 
 Open `http://<hostname>.local/` and choose **Display skin** on the Radio
-settings page, then save. Both skins are compiled into the firmware. The choice
+settings page, then save. All three skins are compiled into the firmware. The choice
 applies within the next display refresh (up to half a second), is stored in NVS,
 and survives reboot without reflashing or interrupting playback.
 
@@ -123,14 +123,22 @@ volume and buffer indicators become shorter bars near the sides. QR setup
 screens and OFF/tap wake use the same circular boundary; switching preserves
 the current QR/dismissal and wake state.
 
-With LVGL's default built-in allocator, first use of the circular skin adds a
-3 MB PSRAM pool for clipping layers. The pool and each skin's widget tree stay
+**Retro** is a square vintage radio: a walnut-colored cabinet, a woven cloth
+speaker grille, brass trim, and an amber station window with a red pointer
+that follows the selected station. Four smaller round Bakelite-style buttons
+handle volume and stations, with two separate OFF/TUNE keys. The controls have
+cream symbols and a darker pressed appearance. Materials are drawn with LVGL
+lines, gradients and borders; the visible buttons are the actual touch targets.
+It keeps the hostname settings link, optional meters, QR setup and tap wake.
+
+With LVGL's default built-in allocator, first use of Circular or Retro adds one
+shared 3 MB PSRAM pool for drawing and clipping. The pool and each skin's widget tree stay
 allocated for reuse; repeated switches do not keep allocating new screens.
 `CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=3072` allows LVGL's TLSF allocator
 to accept this pool. It is set in `sdkconfig.defaults`; existing configurations
 also need this value in their active `sdkconfig` (menuconfig: Component config >
 LVGL configuration > Memory Settings). A compile-time check rejects a pool
-limit too small for the circular skin, rather than silently keeping Square.
+limit too small for these skins, rather than silently keeping Square.
 The audio buffer keeps its existing capacity. A different physical panel
 still needs its own BSP/driver.
 

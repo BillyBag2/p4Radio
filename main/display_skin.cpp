@@ -5,10 +5,37 @@
 #include <cmath>
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 // LVGL 9.3 exposes the hit-test callback payload in this header.
 #include "src/core/lv_obj_event_private.h"
 
 namespace p4radio {
+
+bool DisplaySkin::prepare_drawing_pool()
+{
+#if LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN
+    // Shared by Circular and Retro and retained while their cached widget
+    // trees/draw buffers can reference it. Never add a pool per activation.
+    static void *pool_memory = nullptr;
+    if (pool_memory) return true;
+    constexpr size_t pool_bytes = 3 * 1024 * 1024;
+    static_assert(LV_MEM_SIZE + LV_MEM_POOL_EXPAND_SIZE >= pool_bytes,
+                  "Display skins require CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=3072; "
+                  "update the active sdkconfig as well as sdkconfig.defaults");
+    pool_memory = heap_caps_malloc(pool_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!pool_memory) {
+        ESP_LOGE(kTag, "Cannot allocate skin drawing PSRAM pool");
+        return false;
+    }
+    if (!lv_mem_add_pool(pool_memory, pool_bytes)) {
+        heap_caps_free(pool_memory);
+        pool_memory = nullptr;
+        ESP_LOGE(kTag, "Cannot register skin drawing LVGL pool");
+        return false;
+    }
+#endif
+    return true;
+}
 
 void DisplaySkin::show_settings_qr()
 {
@@ -169,7 +196,7 @@ void DisplaySkin::refresh()
         const int fill = g_buffer_percent.load();
         lv_bar_set_value(buffer_bar_, fill, LV_ANIM_OFF);
         const int low_threshold = 100 / kAudioBufferSeconds; // One second remaining.
-        lv_obj_set_style_bg_color(buffer_bar_, lv_color_hex(fill < low_threshold ? 0xffa020 : 0x309cff), LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(buffer_bar_, lv_color_hex(fill < low_threshold ? buffer_low_color_ : buffer_color_), LV_PART_INDICATOR);
     }
     if (volume_bar_) {
         if (g_show_volume_bar.load()) lv_obj_remove_flag(volume_bar_, LV_OBJ_FLAG_HIDDEN);
@@ -192,7 +219,7 @@ void DisplaySkin::refresh()
         const int x = kMeterMargin + static_cast<int>(std::lround((value + 3.0f) / 6.0f * travel));
         lv_obj_set_x(bandwidth_needle_, x);
     }
-
+    refresh_theme();
 }
 
 bool DisplaySkin::build(lv_obj_t *screen)
