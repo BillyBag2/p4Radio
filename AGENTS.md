@@ -93,7 +93,7 @@ do not claim a successful build or install/replace the user's setup implicitly.
   Respect the NVS-backed maximum bitrate for directory entries, cache and HLS
   variants; lower caps can select the 48 kbit/s BBC fallback. Never silently
   exceed a finite cap. Unlimited also selects the highest available rate.
-  The player supports unencrypted AAC in MPEG-TS and basic master playlists;
+  The player supports unencrypted AAC in MPEG-TS or packed ADTS HLS and basic master playlists;
   enabled decoder libraries do not imply support for other stream containers.
 - Decoding/download and speaker output run concurrently. PCM capacity is twenty
   seconds, startup threshold 0.5 seconds, target ten seconds, and underrun

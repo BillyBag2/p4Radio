@@ -294,7 +294,10 @@ bool play_stream(const Station &station, int station_index)
         size_t aac_size = 0;
         if (!extract_aac_from_mpeg_ts(transport_stream, transport_size, aac_data, kHlsSegmentMaxSize, aac_size)) {
             ESP_LOGE(kTag, "Could not extract AAC from HLS segment (%u bytes)", static_cast<unsigned>(transport_size));
-            set_status("BBC segment format not recognized");
+            ESP_LOGE(kTag, "Segment prefix: %02x %02x %02x %02x", transport_size > 0 ? transport_stream[0] : 0,
+                     transport_size > 1 ? transport_stream[1] : 0, transport_size > 2 ? transport_stream[2] : 0,
+                     transport_size > 3 ? transport_stream[3] : 0);
+            set_status("Stream segment format not supported");
             failed = true;
             break;
         }

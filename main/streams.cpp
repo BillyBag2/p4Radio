@@ -1,6 +1,7 @@
 #include "radio.hpp"
 #include "radio_browser_dns.hpp"
 #include "station_rules.hpp"
+#include "hls_aac.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -333,6 +334,14 @@ bool extract_aac_from_mpeg_ts(const uint8_t *transport_stream, size_t transport_
     size_t pes_remaining = 0;
     bool unbounded_pes = false;
     aac_size = 0;
+    size_t packed_start = 0;
+    if (packed_hls_aac(transport_stream, transport_size, packed_start)) {
+        const size_t length = transport_size - packed_start;
+        if (length > aac_capacity) return false;
+        std::memcpy(aac_data, transport_stream + packed_start, length);
+        aac_size = length;
+        return true;
+    }
     for (size_t offset = 0; offset + kTsPacketSize <= transport_size; offset += kTsPacketSize) {
         const uint8_t *packet = transport_stream + offset;
         if (packet[0] != 0x47) return false;

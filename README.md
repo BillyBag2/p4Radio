@@ -101,7 +101,7 @@ radio's audio. Stop it beside the station or in the preview controls. HLS uses
 native browser support or HLS.js 1.7.3, loaded on demand from jsDelivr. Browser
 codec support, stream availability and CORS can prevent a preview; Open stream
 provides a direct link. A browser preview is not proof the radio can decode it.
-The radio still supports unencrypted AAC in MPEG-TS HLS, not MP3, direct AAC,
+The radio still supports unencrypted AAC in MPEG-TS or packed ADTS HLS, not MP3, direct AAC,
 encrypted HLS or fragmented MP4. Unsupported formats cannot be added through
 this browser.
 
@@ -147,7 +147,7 @@ A stream is saved in the `streams96` NVS namespace after 30 seconds of decoded P
 
 Decode/output errors, unsupported segment formats, or 30 seconds without audio cause the player to try the next candidate. A failing cached URL is removed. After all candidates fail, the directory is searched again. Playback also retries after Wi-Fi reconnects. Search is performed when a station is selected, not as a background scan of every preset.
 
-The player supports unencrypted AAC in MPEG-TS HLS, including basic master playlists. MP3, direct continuous AAC, encrypted HLS, and fragmented MP4 are not supported and are not intentionally cached. Changing preset names/order in firmware should be accompanied by clearing the `streams96` namespace, since cache keys identify preset slots.
+The player supports unencrypted AAC in MPEG-TS or packed ADTS HLS, including basic master playlists. MP3, direct continuous AAC, encrypted HLS, and fragmented MP4 are not supported and are not intentionally cached. Changing preset names/order in firmware should be accompanied by clearing the `streams96` namespace, since cache keys identify preset slots.
 
 Use ESP-IDF 6.1 (or a compatible ESP-IDF release supported by the pinned components):
 
