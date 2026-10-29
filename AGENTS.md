@@ -26,6 +26,9 @@ disagree, especially around dormant-state wake handling.
 | `main/settings.cpp` | Preferences, hostname validation, shared status helpers |
 | `main/network.cpp` | Wi-Fi/AP lifecycle, join deadline, mDNS, setup HTTP handlers |
 | `main/streams.cpp` | Radio Browser discovery, URL cache, HTTP, HLS, MPEG-TS extraction |
+| `main/radio_browser_dns.cpp`, `.hpp` | DNS SRV server discovery, bounded wire parser and shuffled HTTPS origins |
+| `main/station_catalog.cpp`, `.hpp`, `station_rules.hpp` | Stable station slots/identities, NVS catalog, mute/navigation and cache-owner rules |
+| `main/station_web.cpp`, `main/web/stations.*` | Station-management JSON API, async directory discovery and client-side browser/previews |
 | `main/playback.cpp` | AAC decoding, PCM buffering, audio output task, idle/resume lifecycle |
 | `main/display.cpp` | BSP display startup, selected skin and refresh timer |
 | `main/display_skin.cpp`, `.hpp` | Abstract skin base, shared widgets, controls, QR and wake behavior |
@@ -109,6 +112,12 @@ do not claim a successful build or install/replace the user's setup implicitly.
   promptly even if playback cleanup is still pending.
 - TUNE clears stream URLs/candidates and forces fresh discovery. Preserve Wi-Fi,
   hostname, volume, and station preferences.
+- Obtain Radio Browser servers through the documented `_api._tcp.radio-browser.info`
+  SRV lookup using the network's DNS configuration. Shuffle discovered origins
+  and try the next on failure; never pin directory hosts. Cached streams bypass
+  discovery. Run DNS in playback or the dedicated browser-discovery task, off LVGL/HTTP callbacks, and retain
+  BBC fallbacks if DNS/directory access fails. Truncated UDP replies retry over
+  TCP; DNS buffers are on the heap, with bounded, cancellable socket waits.
 - Wi-Fi joins have a 30-second deadline including DHCP. Failure restores AP
   setup; successful IP acquisition cancels the deadline.
 - Default hostname is `p4radio`, saved in NVS and advertised by mDNS on AP/LAN.
@@ -118,6 +127,22 @@ do not claim a successful build or install/replace the user's setup implicitly.
   is intentionally removed: do not add wildcard DNS, probe routes, or redirects.
 - Setup POST uses HTTP 303 to GET `/connecting`. Its busy page waits three
   seconds and polls status without resubmitting credentials or restarting joins.
+- `/stations` searches Radio Browser directly from the browser, with debounced
+  and cancellable requests, pagination and filters. `/api/directory` supplies
+  SRV-discovered HTTPS origins asynchronously, including while OFF. Previews
+  play on the client (native audio or pinned HLS.js), not the speaker. Treat
+  directory data as untrusted text; never interpolate it into HTML.
+- Keep five immutable preset slots (0-4) and up to 19 custom slots. Muted entries
+  remain in settings but are skipped by navigation; only custom entries can be
+  removed. All-muted state is valid: `g_station == -1`, token 0, no playback.
+  Use station snapshots/name helpers instead of indexing presets with g_station.
+  Retro's dial maps the enabled list, not raw slot numbers.
+- Catalog writers run only in the HTTP task: edit a heap snapshot, commit the
+  bounded versioned `p4radio/stations` NVS blob, then publish POD records under
+  the short catalog critical section. Never perform NVS or string allocation
+  inside that section. Reused slots receive monotonically increasing IDs;
+  compare the selected token in audio cancellation and cache ownership to
+  prevent delete/re-add races. Keep candidate arrays private to playback.
 
 ## Concurrency and audio
 
@@ -145,9 +170,11 @@ python tools/convert_tuning_sound.py
 
 ## Persistence and verification
 
-`p4radio` NVS stores credentials, hostname, volume, station selection, and display preferences including skin.
+`p4radio` NVS stores credentials, hostname, volume, station selection, skin and
+the station catalog (a blob, not a string: it can exceed NVS's string limit).
 `streams96` stores qualified stream URLs and cache revision. Preset cache keys
-refer to slots, so reordering presets requires a deliberate migration. Do not
+refer to slots, with owner IDs for added stations; legacy untagged cache is
+accepted only for unchanged BBC presets. Reordering presets requires a migration. Do not
 erase all NVS to clear stream URLs. Full NVS erase also removes Wi-Fi credentials.
 Do not log passwords or commit device credentials.
 
@@ -158,3 +185,14 @@ changes, describe board checks such as wrong-password timeout, AP QR transitions
 refresh without POST replay, uninterrupted playback, immediate volume/clicks,
 TUNE, and OFF/tap resume. State which checks actually ran and what remains
 unverified. Do not flash, erase storage, stage, or commit unless requested.
+
+DNS wire-parser regression checks run at compile time with the ESP-IDF compiler:
+`riscv32-esp-elf-g++ -std=gnu++26 -fsyntax-only -I main tools/check_radio_browser_dns.cpp`.
+They check the actual parser, not live DNS/network behavior on the board.
+
+Station checks: `riscv32-esp-elf-g++ -std=gnu++26 -fsyntax-only -I main tools/check_station_rules.cpp`
+and `node tools/check_station_browser.mjs`. The latter runs the actual page
+script with mocked DOM/network/audio; it does not verify rendering, CORS or
+media decoding. On-board checks must include NVS round-trip, all stations muted,
+mute/delete during playback, stale tab actions, delete/re-add cache isolation,
+TUNE retaining the catalog, and OFF/wake after changing the enabled list.

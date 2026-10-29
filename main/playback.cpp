@@ -56,6 +56,8 @@ struct AudioBuffer {
     size_t bytes_per_second = 0;
     size_t frame_bytes = 0;
     int station = 0;
+    uint32_t station_id = 0;
+    const char *station_name = nullptr; // Owned by play_stream's Station until output joins.
     std::atomic<bool> stop{false};
     std::atomic<bool> error{false};
     std::atomic<uint32_t> played_ms{0};
@@ -66,7 +68,7 @@ struct AudioBuffer {
 bool audio_cancelled(const AudioBuffer &buffer)
 {
     return buffer.stop.load() || g_scan_requested.load() || g_sleep_requested.load() ||
-        !g_playback_requested.load() || g_station.load() != buffer.station;
+        !g_playback_requested.load() || g_station.load() != buffer.station || g_station_token.load() != buffer.station_id;
 }
 
 void audio_output_task(void *argument)
@@ -106,7 +108,7 @@ void audio_output_task(void *argument)
             matcher.reset();
             last_control = xTaskGetTickCount();
             set_stream_loading_sound(false);
-            set_status((std::string("Playing ") + kStations[buffer.station].name).c_str());
+            set_status((std::string("Playing ") + buffer.station_name).c_str());
         }
         if (xTaskGetTickCount() - last_control >= pdMS_TO_TICKS(1000)) {
             controller.update(static_cast<float>(available) / buffer.bytes_per_second, kAudioBufferTargetSeconds);
@@ -193,6 +195,8 @@ bool play_stream(const Station &station, int station_index)
 
     AudioBuffer audio;
     audio.station = station_index;
+    audio.station_id = station.id;
+    audio.station_name = station.name.c_str();
     bool output_task_started = false;
     bool audio_open = false;
     bool first_audio = true;
@@ -202,7 +206,7 @@ bool play_stream(const Station &station, int station_index)
     std::string last_segment;
     std::string media_url = playlist_url;
     int playlist_depth = 0;
-    while (g_connected.load() && g_playback_requested.load() && !g_scan_requested.load() && !g_sleep_requested.load() && g_station.load() == station_index) {
+    while (g_connected.load() && g_playback_requested.load() && !g_scan_requested.load() && !g_sleep_requested.load() && g_station.load() == station_index && g_station_token.load() == station.id) {
         if (audio.error.load()) { failed = true; break; }
         const TickType_t last_progress = output_task_started ? audio.last_output.load() : last_audio_tick;
         if (xTaskGetTickCount() - last_progress > pdMS_TO_TICKS(30000)) { failed = true; break; }
@@ -299,7 +303,7 @@ bool play_stream(const Station &station, int station_index)
         raw.buffer = aac_data;
         raw.len = aac_size;
         uint64_t segment_audio_us = 0;
-        while (raw.len && !g_scan_requested.load() && !g_sleep_requested.load() && g_station.load() == station_index) {
+        while (raw.len && !g_scan_requested.load() && !g_sleep_requested.load() && g_station.load() == station_index && g_station_token.load() == station.id) {
             esp_audio_simple_dec_out_t decoded{};
             decoded.buffer = output;
             decoded.len = output_size;
@@ -346,7 +350,7 @@ bool play_stream(const Station &station, int station_index)
                     output_task_started = true;
                     audio_open = true;
                     first_audio = false;
-                    ESP_LOGI(kTag, "Playing %s as AAC HLS", station.name);
+                    ESP_LOGI(kTag, "Playing %s as AAC HLS", station.name.c_str());
                     set_status("Priming audio buffer...");
                 }
                 if (audio_open) {
@@ -369,9 +373,9 @@ bool play_stream(const Station &station, int station_index)
                         segment_audio_us += duration;
                     }
                     if (!cached && audio.played_ms.load() >= 30000 && !audio.error.load()) {
-                        cache_stream(station_index, playlist_url);
+                        cache_stream(station_index, playlist_url, station.id);
                         cached = true;
-                        ESP_LOGI(kTag, "Cached verified stream for %s", station.name);
+                        ESP_LOGI(kTag, "Cached verified stream for %s", station.name.c_str());
                     }
                 }
             }
@@ -402,8 +406,8 @@ bool play_stream(const Station &station, int station_index)
     heap_caps_free(transport_stream);
     heap_caps_free(aac_data);
     heap_caps_free(output);
-    if (failed && g_connected.load() && g_station.load() == station_index && g_playback_requested.load()) {
-        if (cached) cache_stream(station_index, {});
+    if (failed && g_connected.load() && g_station.load() == station_index && g_station_token.load() == station.id && g_playback_requested.load()) {
+        if (cached) cache_stream(station_index, {}, station.id);
         ++g_candidate_index[station_index];
         set_status("Stream failed; trying another source");
     }
@@ -412,6 +416,7 @@ bool play_stream(const Station &station, int station_index)
 
 void playback_task(void *)
 {
+    bool empty_stations_reported = false;
     while (true) {
         if (g_sleep_requested.load()) {
             // Audio output has joined and released the codec. Keep LVGL, touch
@@ -430,8 +435,10 @@ void playback_task(void *)
                 vTaskDelay(pdMS_TO_TICKS(20));
             }
             g_idle_ready.store(false);
+            empty_stations_reported = false;
         }
         if (g_scan_requested.exchange(false)) {
+            empty_stations_reported = false;
             // Playback has returned and released its decoder, speaker and HTTP clients.
             nvs_handle_t cache;
             esp_err_t result = nvs_open("streams96", NVS_READWRITE, &cache);
@@ -443,7 +450,6 @@ void playback_task(void *)
             }
             for (auto &candidates : g_candidates) candidates.clear();
             g_candidate_index.fill(0);
-            g_url_bitrates.clear();
             g_stream_kbps.store(0);
             g_download_kbps.store(0);
             if (result != ESP_OK) {
@@ -456,6 +462,7 @@ void playback_task(void *)
             }
         }
         if (!g_connected.load() || !g_playback_requested.load()) {
+            empty_stations_reported = false;
             vTaskDelay(pdMS_TO_TICKS(250));
             continue;
         }
@@ -463,7 +470,15 @@ void playback_task(void *)
             test_internet_connection();
         }
         const int selected = g_station.load();
-        play_stream(kStations[selected], selected);
+        const Station station = station_copy(selected);
+        if (!station.id || !station.enabled) {
+            if (!empty_stations_reported) set_status("No stations enabled; open Stations in settings");
+            empty_stations_reported = true;
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+        empty_stations_reported = false;
+        play_stream(station, selected);
         // Retain retry backoff, but do not make STOP/wake wait a full second.
         for (int i = 0; i < 50 && !g_sleep_requested.load(); ++i)
             vTaskDelay(pdMS_TO_TICKS(20));

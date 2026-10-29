@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Stations - p4Radio</title>
+  <link rel="stylesheet" href="/stations.css">
+  <script src="/stations.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">p4Radio</p>
+    <h1>Stations</h1>
+    <nav aria-label="Settings pages"><a href="/">Radio settings</a><a href="/wifi">Wi-Fi settings</a></nav>
+    <p>Find a station, listen here, then add it to your radio.</p>
+    <nav aria-label="Stations sections"><a href="#browse-heading">Find stations</a><a href="#saved-heading">My stations</a></nav>
+  </header>
+  <section class="player" aria-labelledby="preview-heading">
+    <div><h2 id="preview-heading">Listen here</h2><p id="preview-name">Choose a station to preview.</p></div>
+    <audio id="preview" controls preload="none"></audio>
+    <div class="actions"><button id="stop-preview" class="secondary" disabled>Stop preview</button><a id="stream-link" hidden target="_blank" rel="noopener noreferrer">Open stream</a></div>
+    <p id="preview-status" class="hint" role="status">Preview plays in this browser, without changing the radio.</p>
+  </section>
+  <p id="notice" role="status" aria-live="polite"></p>
+  <section aria-labelledby="saved-heading">
+    <div class="section-head"><div><h2 id="saved-heading">My stations</h2><p id="saved-summary" class="hint">Loading saved stations...</p></div><button id="reload-saved" class="secondary">Refresh list</button></div>
+    <p class="hint">Mute skips a station on the radio but keeps it here. Enable it again at any time. Added stations can also be removed.</p>
+    <div class="saved-filters"><label>Find a saved station<input id="saved-search" type="search" placeholder="Station name"></label><label>Show<select id="saved-state"><option value="all">All saved stations</option><option value="enabled">Enabled</option><option value="muted">Muted</option></select></label></div>
+    <div id="saved-list" class="station-list" aria-live="polite"></div>
+  </section>
+  <section aria-labelledby="browse-heading">
+    <h2 id="browse-heading">Find stations</h2>
+    <p class="hint">Search and previews use your browser's internet connection. Only AAC HLS stations can be added to this radio; other formats can be previewed here.</p>
+    <form id="filters">
+      <label class="wide">Station name<input id="search" type="search" maxlength="100" placeholder="Try BBC, Heart, jazz..." autocomplete="off"></label>
+      <label>Country<select id="country"><option value="">All countries</option><option value="GB">United Kingdom</option><option value="US">United States</option><option value="AU">Australia</option><option value="CA">Canada</option><option value="DE">Germany</option><option value="FR">France</option><option value="NL">Netherlands</option></select></label>
+      <label>Language<input id="language" maxlength="48" placeholder="e.g. English"></label>
+      <label>Genre / tag<input id="tag" maxlength="48" placeholder="e.g. news, classical"></label>
+      <label>Codec<select id="codec"><option value="">All codecs</option><option>AAC</option><option>AAC+</option><option>MP3</option><option>OGG</option><option>OPUS</option></select></label>
+      <label>Maximum bitrate<select id="bitrate"><option value="0">Any bitrate</option><option value="24">24 kbit/s</option><option value="32">32 kbit/s</option><option value="48">48 kbit/s</option><option value="64">64 kbit/s</option><option value="96">96 kbit/s</option><option value="128">128 kbit/s</option><option value="160">160 kbit/s</option><option value="192">192 kbit/s</option><option value="256">256 kbit/s</option><option value="320">320 kbit/s</option></select></label>
+      <label>Sort by<select id="sort"><option value="clickcount">Most popular</option><option value="name">Name A-Z</option><option value="bitrate">Highest bitrate</option></select></label>
+      <div class="checks wide"><label><input id="compatible" type="checkbox" checked>Radio-compatible only</label><label><input id="working" type="checkbox" checked>Hide broken streams</label><label><input id="https" type="checkbox">HTTPS streams only</label></div>
+      <button type="submit">Search</button>
+    </form>
+    <div class="section-head"><p id="search-status" role="status" aria-live="polite">Discovering directory servers...</p><button id="retry-directory" class="secondary">Retry directory</button></div>
+    <div id="results" class="station-list" aria-busy="false"></div>
+    <div class="pagination"><button id="previous" class="secondary" disabled>Previous results</button><span id="page-number"></span><button id="next" class="secondary" disabled>Next results</button></div>
+    <p class="hint">Directory: <a href="https://www.radio-browser.info/" target="_blank" rel="noopener noreferrer">Radio Browser</a>. A successful browser preview does not guarantee that the radio supports the stream's container or encoding.</p>
+  </section>
+</main>
+</body>
+</html>

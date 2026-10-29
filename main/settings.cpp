@@ -79,7 +79,7 @@ void load_preferences()
         return;
     }
     int32_t value = 0;
-    if (nvs_get_i32(nvs, "station", &value) == ESP_OK && value >= 0 && value < kStationCount) {
+    if (nvs_get_i32(nvs, "station", &value) == ESP_OK && value >= 0 && value < kMaxStations) {
         g_station.store(value);
     }
     if (nvs_get_i32(nvs, "volume10", &value) != ESP_OK) {

@@ -76,12 +76,12 @@ void DisplaySkin::radio_button(Action action)
     request_button_sound();
     switch (action) {
     case Action::PreviousStation: // previous station
-        g_station.store((g_station.load() + kStationCount - 1) % kStationCount);
+        select_adjacent_station(-1);
         g_playback_requested.store(true);
         request_preferences_save();
         break;
     case Action::NextStation: // next station
-        g_station.store((g_station.load() + 1) % kStationCount);
+        select_adjacent_station(1);
         g_playback_requested.store(true);
         request_preferences_save();
         break;
@@ -178,7 +178,7 @@ void DisplaySkin::refresh()
             if (!g_sleep_requested.load()) lv_obj_move_foreground(setup_screen_);
         } else lv_obj_add_flag(setup_screen_, LV_OBJ_FLAG_HIDDEN);
     }
-    if (station_label_) lv_label_set_text(station_label_, kStations[g_station.load()].name);
+    if (station_label_) lv_label_set_text(station_label_, selected_station_name().c_str());
     if (status_label_) {
         std::string text = status_copy();
         if (text.rfind("Playing ", 0) == 0) {
@@ -255,7 +255,7 @@ bool DisplaySkin::build(lv_obj_t *screen)
     lv_obj_align(brand, LV_ALIGN_TOP_MID, 0, 26);
 
     station_label_ = lv_label_create(surface_);
-    lv_label_set_text(station_label_, kStations[g_station.load()].name);
+    lv_label_set_text(station_label_, selected_station_name().c_str());
     lv_obj_set_style_text_font(station_label_, &lv_font_montserrat_48, 0);
     lv_obj_set_width(station_label_, 650);
     lv_obj_set_style_text_align(station_label_, LV_TEXT_ALIGN_CENTER, 0);

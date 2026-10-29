@@ -4,7 +4,6 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
-#include <map>
 #include <string>
 #include <vector>
 #include "bsp/esp32_p4_wifi6_touch_lcd_4b.h"
@@ -18,6 +17,7 @@ namespace p4radio {
 inline constexpr char kTag[] = "p4radio";
 inline constexpr char kApSsid[] = "p4Radio-Setup";
 inline constexpr int kStationCount = 5;
+inline constexpr int kMaxStations = 24;
 inline constexpr int kMaxVolume = 10;
 inline constexpr size_t kAudioBufferSeconds = 20;
 inline constexpr size_t kAudioBufferTargetSeconds = 10;
@@ -26,13 +26,22 @@ inline constexpr int kHttpPort = 80;
 inline constexpr size_t kHlsSegmentMaxSize = 512 * 1024;
 inline constexpr size_t kMaxHlsSegments = 24;
 
-struct Station {
+struct PresetStation {
     const char *name;
     const char *playlist_url;
 };
+struct Station {
+    std::string name;
+    std::string playlist_url;
+    std::string uuid;
+    uint32_t id = 0;
+    int bitrate = 0;
+    bool builtin = false;
+    bool enabled = false;
+};
 
 // BBC Radio 4 Extra occupies the repeated BBC4 slot in the original station list.
-inline constexpr std::array<Station, kStationCount> kStations{{
+inline constexpr std::array<PresetStation, kStationCount> kStations{{
     {"BBC Radio 1", "https://as-hls-ww-live.akamaized.net/pool_01505109/live/ww/bbc_radio_one/bbc_radio_one.isml/bbc_radio_one-audio=96000.norewind.m3u8"},
     {"BBC Radio 2", "https://as-hls-ww-live.akamaized.net/pool_74208725/live/ww/bbc_radio_two/bbc_radio_two.isml/bbc_radio_two-audio=96000.norewind.m3u8"},
     {"BBC Radio 4", "https://as-hls-ww-live.akamaized.net/pool_55057080/live/ww/bbc_radio_fourfm/bbc_radio_fourfm.isml/bbc_radio_fourfm-audio=96000.norewind.m3u8"},
@@ -43,6 +52,7 @@ inline constexpr std::array<Station, kStationCount> kStations{{
 inline constexpr int64_t kJoinTimeoutUs = 30000000; // Association and DHCP.
 
 extern std::atomic<int> g_station;
+extern std::atomic<uint32_t> g_station_token;
 inline constexpr std::array<int, 11> kStandardBitrates{{0, 24, 32, 48, 64, 96, 128, 160, 192, 256, 320}};
 bool valid_max_bitrate(int kbps);
 int stream_url_bitrate(const std::string &url);
@@ -79,12 +89,17 @@ extern std::atomic<int> g_buffer_percent;
 extern std::atomic<int> g_stream_channels;
 extern std::atomic<int> g_download_kbps;
 extern std::atomic<int64_t> g_download_time;
-extern std::map<std::string, int> g_url_bitrates;
 extern portMUX_TYPE g_status_mux;
 extern char g_saved_ssid[33];
 extern char g_saved_password[65];
-extern std::array<std::vector<std::string>, kStationCount> g_candidates;
-extern std::array<size_t, kStationCount> g_candidate_index;
+extern std::array<std::vector<std::string>, kMaxStations> g_candidates;
+extern std::array<size_t, kMaxStations> g_candidate_index;
+
+void load_station_catalog();
+Station station_copy(int slot);
+std::string selected_station_name();
+int select_adjacent_station(int direction);
+int station_dial_position();
 
 void set_status(const char *message);
 std::string status_copy();
@@ -98,7 +113,7 @@ void save_wifi_credentials(const char *ssid, const char *password);
 bool ensure_network_stack();
 bool wifi_join_in_progress();
 std::string cached_stream(int index);
-void cache_stream(int index, const std::string &url);
+void cache_stream(int index, const std::string &url, uint32_t station_id);
 std::string resolve_station_url(const Station &station, int index);
 std::string fetch_hls_playlist(const std::string &url);
 std::string make_hls_segment_url(const std::string &playlist_url, const std::string &segment);

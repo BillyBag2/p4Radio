@@ -1,9 +1,12 @@
 #include "radio.hpp"
+#include "radio_browser_dns.hpp"
+#include "station_rules.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include "cJSON.h"
 #include "esp_timer.h"
 #include "esp_crt_bundle.h"
@@ -44,6 +47,15 @@ std::string cached_stream(int index)
 {
     nvs_handle_t handle;
     if (nvs_open("streams96", NVS_READONLY, &handle) != ESP_OK) return {};
+    const Station station = station_copy(index);
+    char owner_key[16];
+    std::snprintf(owner_key, sizeof(owner_key), "owner%d", index);
+    uint32_t owner = 0;
+    const bool has_owner = nvs_get_u32(handle, owner_key, &owner) == ESP_OK;
+    if (!station_rules::cache_owner(station.id, station.builtin, index, has_owner, owner)) {
+        nvs_close(handle);
+        return {};
+    }
     const int limit = g_max_bitrate_kbps.load();
     if (limit > 0) {
         char cap_key[16];
@@ -67,8 +79,9 @@ std::string cached_stream(int index)
     return value;
 }
 
-void cache_stream(int index, const std::string &url)
+void cache_stream(int index, const std::string &url, uint32_t station_id)
 {
+    if (!station_id || station_copy(index).id != station_id) return;
     if (!url.empty() && g_scan_requested.load()) return;
     // NVS keys have a 15-character limit; use a separate key per preset below.
     char key[16];
@@ -80,6 +93,11 @@ void cache_stream(int index, const std::string &url)
         char cap_key[16];
         std::snprintf(cap_key, sizeof(cap_key), "cap%d", index);
         result = nvs_set_i32(handle, cap_key, g_max_bitrate_kbps.load());
+        if (result == ESP_OK) {
+            char owner_key[16];
+            std::snprintf(owner_key, sizeof(owner_key), "owner%d", index);
+            result = nvs_set_u32(handle, owner_key, station_id);
+        }
     }
     if (result == ESP_OK) result = nvs_commit(handle);
     if (result != ESP_OK && result != ESP_ERR_NVS_NOT_FOUND) ESP_LOGW(kTag, "Stream cache: %s", esp_err_to_name(result));
@@ -118,8 +136,15 @@ esp_http_client_handle_t open_http_get(const std::string &url, int &status_code,
 
 std::string resolve_station_url(const Station &station, int index)
 {
+    if (index < 0 || index >= kMaxStations || !station.id || !station.enabled) return {};
     const int limit = g_max_bitrate_kbps.load();
     auto &urls = g_candidates[index];
+    static std::array<uint32_t, kMaxStations> owners{}; // Playback task only.
+    if (owners[index] != station.id) {
+        urls.clear();
+        g_candidate_index[index] = 0;
+        owners[index] = station.id;
+    }
     if (urls.empty()) {
         const std::string saved = cached_stream(index);
         if (!saved.empty()) urls.push_back(saved);
@@ -138,14 +163,26 @@ std::string resolve_station_url(const Station &station, int index)
             encoded += escape;
         }
     }
-    for (const char *host : {"de1.api.radio-browser.info", "nl1.api.radio-browser.info"}) {
-        const std::string query = std::string("https://") + host +
+    const auto cancelled = [index, station_id = station.id] {
+        return !g_connected.load() || !g_playback_requested.load() || g_sleep_requested.load() ||
+            g_scan_requested.load() || g_station.load() != index || g_station_token.load() != station_id;
+    };
+    std::map<std::string, int> bitrates; // Search-local: removed stations do not accumulate metadata.
+    const auto directory_servers = discover_radio_browser_servers();
+    if (cancelled()) return {};
+    for (const std::string &server : directory_servers) {
+        if (cancelled()) return {};
+        const std::string query = server + (station.uuid.empty() ?
             "/json/stations/search?name=" + encoded +
-            "&nameExact=true&hidebroken=true&limit=50&order=bitrate&reverse=false";
+            "&nameExact=true&hidebroken=true&limit=50&order=bitrate&reverse=false" :
+            "/json/stations/byuuid?uuids=" + station.uuid);
         int status = 0;
         esp_err_t error = ESP_OK;
         auto client = open_http_get(query, status, error);
-        if (!client) continue;
+        if (!client) {
+            ESP_LOGW(kTag, "Radio Browser request failed: %s (%s, HTTP %d)", server.c_str(), esp_err_to_name(error), status);
+            continue;
+        }
         const std::string body = read_http_body(client, 65536);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
@@ -166,7 +203,7 @@ std::string resolve_station_url(const Station &station, int index)
                 if (candidate.size() <= 2047 && (candidate.rfind("https://", 0) == 0 || candidate.rfind("http://", 0) == 0) &&
                     std::find(urls.begin(), urls.end(), candidate) == urls.end()) {
                     urls.push_back(candidate);
-                    g_url_bitrates[candidate] = kbps;
+                    bitrates[candidate] = kbps;
                 }
             }
         }
@@ -175,7 +212,11 @@ std::string resolve_station_url(const Station &station, int index)
     }
     // Include explicit BBC variants so a higher ceiling can select higher
     // quality even if the directory only lists the worldwide 96 kbit/s feed.
-    for (int bitrate : {320, 128, 96, 48}) {
+    if (!station.builtin && (limit == 0 || (station.bitrate > 0 && station.bitrate <= limit))) {
+        if (std::find(urls.begin(), urls.end(), station.playlist_url) == urls.end()) urls.push_back(station.playlist_url);
+        bitrates[station.playlist_url] = station.bitrate;
+    }
+    if (station.builtin) for (int bitrate : {320, 128, 96, 48}) {
         if (limit > 0 && bitrate > limit) continue;
         std::string fallback = station.playlist_url;
         const size_t marker = fallback.find("audio=96000");
@@ -188,13 +229,13 @@ std::string resolve_station_url(const Station &station, int index)
             if (path != std::string::npos) fallback.replace(path, std::strlen("/live/ww/"), "/live/uk/");
         }
         if (std::find(urls.begin(), urls.end(), fallback) == urls.end()) urls.push_back(fallback);
-        g_url_bitrates[fallback] = bitrate;
+        bitrates[fallback] = bitrate;
     }
-    std::stable_sort(urls.begin(), urls.end(), [](const std::string &a, const std::string &b) {
-        const int ar = g_url_bitrates[a], br = g_url_bitrates[b];
+    std::stable_sort(urls.begin(), urls.end(), [&bitrates](const std::string &a, const std::string &b) {
+        const int ar = bitrates[a], br = bitrates[b];
         return ar > br; // Highest available rate, including Unlimited.
     });
-    ESP_LOGI(kTag, "%s: trying %u stream candidates", station.name, static_cast<unsigned>(urls.size()));
+    ESP_LOGI(kTag, "%s: trying %u stream candidates", station.name.c_str(), static_cast<unsigned>(urls.size()));
     return urls.empty() ? std::string{} : urls.front();
 }
 

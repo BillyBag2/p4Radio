@@ -39,7 +39,8 @@ int previous_loop = 0;
 std::atomic<bool> stream_loading{false};
 bool tuning_in_progress()
 {
-    return stream_loading.load() && g_connected.load() && g_playback_requested.load() && !g_sleep_requested.load();
+    return stream_loading.load() && g_station_token.load() != 0 && g_connected.load() &&
+        g_playback_requested.load() && !g_sleep_requested.load();
 }
 TickType_t last_radio_mix = 0;
 constexpr size_t data_count = sizeof(kDataSound) / sizeof(kDataSound[0]);
