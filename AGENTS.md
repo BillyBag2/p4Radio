@@ -25,6 +25,7 @@ disagree, especially around dormant-state wake handling.
 | `main/radio.hpp`, `main/radio_state.cpp` | Shared interfaces, constants, state, station presets |
 | `main/settings.cpp` | Preferences, hostname validation, shared status helpers |
 | `main/network.cpp` | Wi-Fi/AP lifecycle, join deadline, mDNS, setup HTTP handlers |
+| `main/stream_input.cpp`, `.hpp`, `icy_audio.hpp` | HTTP audio detection, redirects, M3U/PLS links and ICY metadata stripping |
 | `main/streams.cpp` | Radio Browser discovery, URL cache, HTTP, HLS, MPEG-TS extraction |
 | `main/radio_browser_dns.cpp`, `.hpp` | DNS SRV server discovery, bounded wire parser and shuffled HTTPS origins |
 | `main/station_catalog.cpp`, `.hpp`, `station_rules.hpp` | Stable station slots/identities, NVS catalog, mute/navigation and cache-owner rules |
@@ -87,13 +88,16 @@ do not claim a successful build or install/replace the user's setup implicitly.
 
 ## Behavior to preserve
 
-- Finite bitrate ceilings prefer the highest permitted AAC HLS rate. Unlimited
-  selects the highest available rate without a ceiling. BBC candidates include UK 128/320 kbit/s
-  and worldwide 48/96 kbit/s variants.
-  Respect the NVS-backed maximum bitrate for directory entries, cache and HLS
-  variants; lower caps can select the 48 kbit/s BBC fallback. Never silently
-  exceed a finite cap. Unlimited also selects the highest available rate.
-  The player supports unencrypted AAC in MPEG-TS or packed ADTS HLS and basic master playlists;
+- The NVS `max_bitrate` setting is a desired rate, not a hard ceiling.
+  Prefer the highest known rate at or below it; otherwise select the lowest
+  known available rate. Unknown rates are a last resort. Unlimited selects the
+  highest known rate. Apply the same ordering to directory candidates and HLS
+  variants; retain higher-rate fallbacks and allow direct streams above the
+  preference. Cache tags retain the setting used for qualification, and changing
+  the desired rate retunes. BBC candidates include UK 128/320 kbit/s and worldwide
+  48/96 kbit/s variants. A preference below 48 can still play the 48 kbit/s fallback.
+  The player supports unencrypted AAC in MPEG-TS or packed ADTS HLS, basic master playlists,
+  and continuous HTTP MP3/AAC (including AAC+);
   enabled decoder libraries do not imply support for other stream containers.
 - Decoding/download and speaker output run concurrently. PCM capacity is twenty
   seconds, startup threshold 0.5 seconds, target ten seconds, and underrun
@@ -196,3 +200,5 @@ script with mocked DOM/network/audio; it does not verify rendering, CORS or
 media decoding. On-board checks must include NVS round-trip, all stations muted,
 mute/delete during playback, stale tab actions, delete/re-add cache isolation,
 TUNE retaining the catalog, and OFF/wake after changing the enabled list.
+
+ICY framing checks: `riscv32-esp-elf-g++ -std=gnu++26 -fsyntax-only -I main tools/check_icy_audio.cpp`. Direct MP3/AAC, AAC+, redirects, ICY metadata and persisted preview type need board verification alongside BBC HLS playback.

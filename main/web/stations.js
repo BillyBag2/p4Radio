@@ -11,7 +11,7 @@
     catch { return ''; }
   }
   const streamUrl = station => safeUrl(station.url_resolved || station.url || '');
-  const compatible = station => Number(station.hls) === 1 && String(station.codec || '').toUpperCase().includes('AAC');
+  const compatible = station => { const codec = String(station.codec || '').toUpperCase(); return codec.includes('AAC') || (Number(station.hls) === 0 && codec === 'MP3'); };
   const bytes = value => new TextEncoder().encode(value).length;
   function notice(message, error = false) { $('notice').textContent = message; $('notice').classList.toggle('error', error); }
   function element(tag, text, cls) { const node = document.createElement(tag); if (text) node.textContent = text; if (cls) node.className = cls; return node; }
@@ -37,7 +37,7 @@
     const catalog = await localApi('/api/stations');
     if (version !== state.catalogVersion) return;
     state.catalog = catalog;
-    if (initial) $('bitrate').value = String(catalog.max_bitrate || 0);
+    if (initial) $('bitrate').value = '0'; // Search filtering is independent of the playback preference.
     renderSaved(); renderResults();
   }
 
@@ -59,7 +59,7 @@
       if (station.builtin) badges.append(element('span', 'Preset', 'badge'));
       if (station.slot === state.catalog.selected) badges.append(element('span', 'Selected', 'badge'));
       info.append(badges);
-      const listen = listenButton({...station, hls: 1, codec: 'AAC'});
+      const listen = listenButton({...station, hls: station.hls === false ? 0 : 1});
       const toggle = button(station.enabled ? 'Mute' : 'Enable', () => change({action: station.enabled ? 'mute' : 'unmute', slot: station.slot, id: station.id}, station.name));
       toggle.disabled = state.saving.has(String(station.id));
       actions.append(listen, toggle);
@@ -106,7 +106,7 @@
           bitrate: Number(station.bitrate) || 0, hls: Number(station.hls) === 1, codec: String(station.codec || '').toUpperCase()}, station.name);
       });
       let reason = '';
-      if (!compatible(station)) reason = 'This radio currently supports AAC HLS streams.';
+      if (!compatible(station)) reason = 'This radio supports AAC HLS, direct AAC and MP3 streams.';
       else if (!url || bytes(url) > 1024 || !uuidValid(station.stationuuid) || !station.name || bytes(station.name) > 96)
         reason = 'This station has missing details or a link/name too long to save.';
       else if (state.catalog && state.catalog.stations.length >= state.catalog.capacity) reason = 'Remove an added station to make room.';
@@ -114,7 +114,7 @@
       if (reason) { add.title = reason; info.append(element('p', reason, 'meta')); }
       const cap = state.catalog?.max_bitrate || 0;
       if (cap && (!Number(station.bitrate) || Number(station.bitrate) > cap))
-        info.append(element('p', `The radio's current bitrate limit is ${cap} kbit/s. This stream may require a different limit in Radio settings.`, 'meta'));
+        info.append(element('p', `The radio prefers ${cap} kbit/s or less. If no lower rate is available, it will use the lowest available rate.`, 'meta'));
       actions.append(listen, add); card.append(info, actions); parent.append(card);
     }
     if (!state.loading && !rows.length) empty(parent, state.rows.length ?

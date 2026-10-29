@@ -92,7 +92,7 @@ Open **Stations** from the links near the top of Radio settings or Wi-Fi
 settings (`http://<hostname>.local/stations`). **Find stations** searches as
 names are typed, with country, language, genre/tag, codec, maximum bitrate,
 HTTPS and working-stream filters, sorting and pagination. **Radio-compatible
-only** filters each result page to AAC HLS entries; use Next results to inspect
+only** filters each result page to AAC HLS, direct AAC and MP3 entries; use Next results to inspect
 more matches or disable that filter to preview other codecs.
 
 **Listen here** plays a preview on your phone/computer without changing the
@@ -100,7 +100,7 @@ radio's audio. Stop it beside the station or in the preview controls. HLS uses
 native browser support or HLS.js 1.7.3, loaded on demand from jsDelivr. Browser
 codec support, stream availability and CORS can prevent a preview; Open stream
 provides a direct link. A browser preview is not proof the radio can decode it.
-The radio still supports unencrypted AAC in MPEG-TS or packed ADTS HLS, not MP3, direct AAC,
+The radio supports continuous HTTP MP3/AAC (including AAC+) and unencrypted AAC in MPEG-TS or packed ADTS HLS, not
 encrypted HLS or fragmented MP4. Unsupported formats cannot be added through
 this browser.
 
@@ -130,7 +130,7 @@ with the saved chosen URL as a fallback; BBC rate variants remain preset-only.
 
 ### Station discovery and stream cache
 
-On first selection, the firmware searches Radio Browser for the preset's exact name (case insensitive), using a dynamically discovered directory server list. It considers AAC HLS results and retains a BBC worldwide 96 kbit/s URL as a fallback. The five BBC presets remain available alongside added stations; the web Stations page provides live text search. Directory API: https://api.radio-browser.info/
+On first selection, the firmware searches Radio Browser for the preset's exact name (case insensitive), using a dynamically discovered directory server list. It considers AAC HLS, direct AAC and MP3 results and retains a BBC worldwide 96 kbit/s URL as a fallback. The five BBC presets remain available alongside added stations; the web Stations page provides live text search. Directory API: https://api.radio-browser.info/
 
 The server list follows [Radio Browser's documented DNS SRV alternative](https://api.radio-browser.info/):
 query `_api._tcp.radio-browser.info` through the network's configured DNS servers,
@@ -146,7 +146,7 @@ A stream is saved in the `streams96` NVS namespace after 30 seconds of decoded P
 
 Decode/output errors, unsupported segment formats, or 30 seconds without audio cause the player to try the next candidate. A failing cached URL is removed. After all candidates fail, the directory is searched again. Playback also retries after Wi-Fi reconnects. Search is performed when a station is selected, not as a background scan of every preset.
 
-The player supports unencrypted AAC in MPEG-TS or packed ADTS HLS, including basic master playlists. MP3, direct continuous AAC, encrypted HLS, and fragmented MP4 are not supported and are not intentionally cached. Changing preset names/order in firmware should be accompanied by clearing the `streams96` namespace, since cache keys identify preset slots.
+The player supports continuous HTTP MP3/AAC (including AAC+) and unencrypted AAC in MPEG-TS or packed ADTS HLS, including basic master playlists. M3U/PLS links and HTTP redirects are resolved with bounded nesting; ICY metadata is stripped before decoding. Encrypted HLS, fragmented MP4, Ogg and Opus are not supported and are not intentionally cached. Changing preset names/order in firmware should be accompanied by clearing the `streams96` namespace, since cache keys identify preset slots.
 
 Use ESP-IDF 6.1 (or a compatible ESP-IDF release supported by the pinned components):
 
@@ -234,3 +234,7 @@ UI button callbacks queue preference saves for a separate low-priority task and 
 ### Stream tuning sound
 
 `assets/sounds/radio-tuning.wav` is preserved and converted by `python tools/convert_tuning_sound.py` from 44.1 kHz mono to `main/sound_data_tuning.hpp`: 24 kHz signed 16-bit PCM, 120,000 samples / 240,000 bytes. It loops at half amplitude during stream lookup, loading, initial buffering, and underrun refill. It stops when buffered playback starts, the attempt fails, or playback is stopped. Wi-Fi connection feedback takes priority if the network is reconnecting; button clicks layer over either background effect. No extra runtime decoder is required.
+
+### Desired stream bitrate
+
+The saved `max_bitrate` setting is a preference: choose the highest known available rate at or below it, or the lowest known rate if none fit. Unknown rates are tried last; Unlimited chooses the highest known rate. Directory candidates and HLS variants use the same ordering, and continuous MP3/AAC streams may exceed the preference when needed. For example, Heart Gloucestershire's 128 kbit/s stream remains playable with a 96 kbit/s preference. Changing the preference retunes; the station browser's explicit maximum-bitrate filter remains independent and starts unrestricted.

@@ -194,13 +194,13 @@ std::string resolve_station_url(const Station &station, int index)
                 const auto *hls = cJSON_GetObjectItemCaseSensitive(entry, "hls");
                 const auto *codec = cJSON_GetObjectItemCaseSensitive(entry, "codec");
                 const auto *url = cJSON_GetObjectItemCaseSensitive(entry, "url_resolved");
-                if (!cJSON_IsNumber(hls) || hls->valueint != 1 || !cJSON_IsString(codec) ||
-                    std::string(codec->valuestring).find("AAC") == std::string::npos ||
+                if (!cJSON_IsString(codec) ||
+                    (std::string(codec->valuestring).find("AAC") == std::string::npos &&
+                     !(cJSON_IsNumber(hls) && hls->valueint == 0 && std::string(codec->valuestring) == "MP3")) ||
                     !cJSON_IsString(url)) continue;
                 const std::string candidate = url->valuestring;
                 const auto *rate = cJSON_GetObjectItemCaseSensitive(entry, "bitrate");
                 const int kbps = cJSON_IsNumber(rate) ? rate->valueint : 0;
-                if (limit > 0 && (kbps <= 0 || kbps > limit)) continue;
                 if (candidate.size() <= 2047 && (candidate.rfind("https://", 0) == 0 || candidate.rfind("http://", 0) == 0) &&
                     std::find(urls.begin(), urls.end(), candidate) == urls.end()) {
                     urls.push_back(candidate);
@@ -213,12 +213,11 @@ std::string resolve_station_url(const Station &station, int index)
     }
     // Include explicit BBC variants so a higher ceiling can select higher
     // quality even if the directory only lists the worldwide 96 kbit/s feed.
-    if (!station.builtin && (limit == 0 || (station.bitrate > 0 && station.bitrate <= limit))) {
+    if (!station.builtin) {
         if (std::find(urls.begin(), urls.end(), station.playlist_url) == urls.end()) urls.push_back(station.playlist_url);
         bitrates[station.playlist_url] = station.bitrate;
     }
     if (station.builtin) for (int bitrate : {320, 128, 96, 48}) {
-        if (limit > 0 && bitrate > limit) continue;
         std::string fallback = station.playlist_url;
         const size_t marker = fallback.find("audio=96000");
         if (marker == std::string::npos) continue;
@@ -232,9 +231,9 @@ std::string resolve_station_url(const Station &station, int index)
         if (std::find(urls.begin(), urls.end(), fallback) == urls.end()) urls.push_back(fallback);
         bitrates[fallback] = bitrate;
     }
-    std::stable_sort(urls.begin(), urls.end(), [&bitrates](const std::string &a, const std::string &b) {
+    std::stable_sort(urls.begin(), urls.end(), [&bitrates, limit](const std::string &a, const std::string &b) {
         const int ar = bitrates[a], br = bitrates[b];
-        return ar > br; // Highest available rate, including Unlimited.
+        return station_rules::prefer_bitrate(ar, br, limit);
     });
     ESP_LOGI(kTag, "%s: trying %u stream candidates", station.name.c_str(), static_cast<unsigned>(urls.size()));
     return urls.empty() ? std::string{} : urls.front();

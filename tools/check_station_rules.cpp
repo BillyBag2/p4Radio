@@ -35,3 +35,18 @@ static_assert(bounded_json(R"({"name":"braces { inside a string","array":[1,2]})
 static_assert(!bounded_json("[[[[[[[[[]]]]]]]]]"));
 static_assert(!bounded_json(R"({"name":"unfinished})"));
 static_assert(!bounded_json("}{}"));
+
+// The same ordering is used by directory candidates and HLS master variants.
+static_assert(prefer_bitrate(96, 64, 96));
+static_assert(prefer_bitrate(64, 128, 96));
+static_assert(prefer_bitrate(128, 320, 96));
+static_assert(prefer_bitrate(48, 96, 24));
+static_assert(prefer_bitrate(320, 128, 0));
+static_assert(prefer_bitrate(128, 0, 96));
+static_assert(!prefer_bitrate(0, 128, 96));
+static_assert(!prefer_bitrate(96, 96, 96));
+static_assert(!prefer_bitrate(0, 0, 96));
+static_assert(decoder_bitrate_kbps(128) == 128);
+static_assert(decoder_bitrate_kbps(128000) == 128);
+static_assert(decoder_bitrate_kbps(48000) == 48);
+static_assert(decoder_bitrate_kbps(0) == 0);

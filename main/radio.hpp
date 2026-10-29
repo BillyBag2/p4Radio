@@ -38,6 +38,7 @@ struct Station {
     int bitrate = 0;
     bool builtin = false;
     bool enabled = false;
+    bool hls = true;
 };
 
 // BBC Radio 4 Extra occupies the repeated BBC4 slot in the original station list.

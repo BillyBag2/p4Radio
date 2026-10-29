@@ -75,7 +75,7 @@ async function fetchMock(path, options = {}) {
     assert.equal(options.headers['Content-Type'], 'application/json');
     const command = JSON.parse(options.body); posts.push(command);
     if (failNextSave) { failNextSave = false; return {ok: false, json: async () => ({ok: false, message: 'Station storage is full'})}; }
-    if (command.action === 'add') catalog.stations.push({slot: 6, id: 7, name: command.name, url: command.url, uuid: command.uuid, bitrate: command.bitrate, enabled: true, builtin: false});
+    if (command.action === 'add') catalog.stations.push({slot: 6, id: 7, name: command.name, url: command.url, uuid: command.uuid, bitrate: command.bitrate, hls: command.hls, enabled: true, builtin: false});
     else if (command.action === 'remove') catalog.stations = catalog.stations.filter(value => value.id !== command.id);
     else catalog.stations.find(value => value.id === command.id).enabled = command.action === 'unmute';
     return response({ok: true, message: 'Stations saved'});
@@ -102,8 +102,8 @@ const findButton = (node, name) => walk(node).find(value => value.tagName === 'b
 const savedCard = name => get('saved-list').children.find(value => value.children[0]?.children[0]?.textContent === name);
 
 await until(() => get('search-status').textContent.includes('matches'));
-assert.equal(get('bitrate').value, '96');
-assert.equal(get('results').children.length, 1, 'Incompatible streams hidden by default');
+assert.equal(get('bitrate').value, '0', 'Playback preference must not hide higher-rate stations');
+assert.equal(get('results').children.length, 2, 'Direct MP3 streams are radio compatible');
 assert(get('results').textContent.includes(testName), 'Names are rendered literally');
 await findButton(get('results'), 'Listen here').dispatch('click');
 assert.equal(hlsLoads, 1); assert.equal(scriptsLoaded, 1); assert.equal(posts.length, 0, 'Preview must not change radio settings');
@@ -126,10 +126,20 @@ get('compatible').checked = false;
 await get('filters').dispatch('submit');
 await until(() => get('results').children.length === 2);
 const mp3 = get('results').children.find(value => value.textContent.includes('MP3 preview'));
-assert(findButton(mp3, 'Add to radio').disabled); assert(!findButton(mp3, 'Listen here').disabled);
+assert(!findButton(mp3, 'Add to radio').disabled); assert(!findButton(mp3, 'Listen here').disabled);
 const postCount = posts.length;
 await findButton(mp3, 'Listen here').dispatch('click'); assert.equal(posts.length, postCount);
 assert(audio.src.includes('/8.m3u8')); // Native audio path for a non-HLS entry.
+await findButton(mp3, 'Add to radio').dispatch('click');
+await until(() => !!savedCard('MP3 preview'));
+assert.equal(posts.at(-1).hls, false);
+await get('stop-preview').dispatch('click');
+const beforeSavedPreview = hlsLoads;
+await findButton(savedCard('MP3 preview'), 'Listen here').dispatch('click');
+assert.equal(hlsLoads, beforeSavedPreview, 'Saved direct MP3 must use native audio');
+await findButton(savedCard('MP3 preview'), 'Remove').dispatch('click');
+await until(() => !savedCard('MP3 preview'));
+
 
 const catalogBeforeFailure = JSON.stringify(catalog);
 failNextSave = true;
@@ -147,7 +157,7 @@ await findButton(savedCard('BBC preset'), 'Enable').dispatch('click');
 await until(() => !!findButton(savedCard('BBC preset'), 'Mute') && !findButton(savedCard('BBC preset'), 'Mute').disabled);
 
 get('country').value = 'GB'; get('language').value = 'English'; get('tag').value = 'jazz';
-get('codec').value = 'AAC'; get('https').checked = true; get('search').value = 'New';
+get('codec').value = 'AAC'; get('bitrate').value = '96'; get('https').checked = true; get('search').value = 'New';
 await get('filters').dispatch('submit');
 await until(() => get('results').textContent.includes('New result'));
 const query = searches.at(-1).searchParams;

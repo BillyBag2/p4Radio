@@ -69,4 +69,23 @@ constexpr bool cache_owner(uint32_t station_id, bool builtin, int slot, bool has
 {
     return station_id && (has_tag ? station_id == tag : builtin && station_id == static_cast<uint32_t>(slot + 1));
 }
+
+// Known rates within the preference first (highest first), then higher rates
+// (lowest first), then unknown rates. Zero preference means Unlimited.
+constexpr bool prefer_bitrate(int64_t a, int64_t b, int64_t desired)
+{
+    const auto group = [desired](int64_t rate) {
+        return rate <= 0 ? 2 : desired > 0 && rate > desired ? 1 : 0;
+    };
+    const int ag = group(a), bg = group(b);
+    if (ag != bg) return ag < bg;
+    return ag == 1 ? a < b : ag == 0 ? a > b : false;
+}
+
+// Some decoder implementations report kbit/s despite the common API's bit/s
+// documentation. Valid MP3/AAC bit/s rates are above this range.
+constexpr uint32_t decoder_bitrate_kbps(uint32_t rate)
+{
+    return rate < 1000 ? rate : (rate + 999) / 1000;
+}
 } // namespace p4radio::station_rules

@@ -1,5 +1,5 @@
 idf_component_register(SRCS "main.cpp" "radio_state.cpp" "settings.cpp" "network.cpp"
-                         "streams.cpp" "radio_browser_dns.cpp" "station_catalog.cpp" "station_web.cpp"
+                         "streams.cpp" "stream_input.cpp" "radio_browser_dns.cpp" "station_catalog.cpp" "station_web.cpp"
                          "playback.cpp" "display.cpp" "display_skin.cpp"
                          "display_skin_square.cpp" "display_skin_circular.cpp" "display_skin_retro.cpp" "button_audio.cpp"
                     INCLUDE_DIRS "."

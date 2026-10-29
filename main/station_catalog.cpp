@@ -21,6 +21,7 @@ struct Record {
     uint32_t id = 0;
     int bitrate = 0;
     bool enabled = false;
+    bool hls = true;
 };
 struct Catalog { std::array<Record, kMaxStations> records{}; uint32_t next = kStationCount + 1; };
 Catalog catalog;
@@ -48,6 +49,7 @@ void reset_record(Record &record)
     record.id = 0;
     record.bitrate = 0;
     record.enabled = false;
+    record.hls = true;
 }
 
 void defaults(Catalog &value)
@@ -110,7 +112,8 @@ cJSON *serialize(const Catalog &value, bool web)
         if (web || slot >= kStationCount) {
             if (!cJSON_AddStringToObject(item, "name", record.name) || !cJSON_AddStringToObject(item, "url", record.url) ||
                 !cJSON_AddStringToObject(item, "uuid", record.uuid) || !cJSON_AddNumberToObject(item, "bitrate", record.bitrate) ||
-                !cJSON_AddBoolToObject(item, "builtin", slot < kStationCount)) return nullptr;
+                !cJSON_AddBoolToObject(item, "builtin", slot < kStationCount) ||
+                !cJSON_AddBoolToObject(item, "hls", record.hls)) return nullptr;
         }
     }
     if (web && (!cJSON_AddNumberToObject(root.get(), "selected", g_station.load()) ||
@@ -150,6 +153,9 @@ bool decode(const cJSON *root, Catalog &value)
             std::snprintf(record.uuid, sizeof(record.uuid), "%s", text(item, "uuid"));
             record.id = id;
             record.bitrate = bitrate;
+            const auto *hls = cJSON_GetObjectItemCaseSensitive(item, "hls");
+            if (hls && !cJSON_IsBool(hls)) return false;
+            record.hls = !hls || cJSON_IsTrue(hls);
         }
         record.enabled = cJSON_IsTrue(enabled);
     }
@@ -200,7 +206,7 @@ Station station_copy(int slot)
         portEXIT_CRITICAL(&catalog_mux);
     }
     if (!record.id) return {"No stations enabled", {}, {}, 0, 0, false, false};
-    return {record.name, record.url, record.uuid, record.id, record.bitrate, slot < kStationCount, record.enabled};
+    return {record.name, record.url, record.uuid, record.id, record.bitrate, slot < kStationCount, record.enabled, record.hls};
 }
 
 std::string selected_station_name()
@@ -261,8 +267,10 @@ esp_err_t update_station_catalog(const cJSON *request, std::string &message)
         const std::string codec = text(request, "codec");
         if (!station_rules::valid_name(name) || !station_rules::valid_url(url) || !station_rules::valid_uuid(uuid) ||
             !number(request, "bitrate", bitrate) || bitrate > 10000 ||
-            !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "hls")) || codec.find("AAC") == std::string::npos) {
-            message = "Choose an AAC HLS station with a valid name, URL and station UUID";
+            !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(request, "hls")) ||
+            (codec.find("AAC") == std::string::npos &&
+             !(codec == "MP3" && cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(request, "hls"))))) {
+            message = "Choose an AAC HLS, direct AAC or MP3 station with a valid name, URL and station UUID";
             return ESP_ERR_INVALID_ARG;
         }
         int free = -1;
@@ -285,6 +293,7 @@ esp_err_t update_station_catalog(const cJSON *request, std::string &message)
         record.id = value->next++;
         record.enabled = true;
         record.bitrate = bitrate;
+        record.hls = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(request, "hls"));
     } else {
         uint32_t slot, id;
         if (!number(request, "slot", slot) || slot >= kMaxStations || !number(request, "id", id) ||
