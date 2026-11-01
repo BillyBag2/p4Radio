@@ -29,6 +29,7 @@ extern "C" void app_main(void)
         nvs_close(cache);
     }
     load_preferences();
+    load_station_catalog();
     gpio_hold_dis(BSP_LCD_BACKLIGHT);
     initialize_audio();
     initialize_button_audio();

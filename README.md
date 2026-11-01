@@ -30,9 +30,10 @@ password and continue.
 - [ ] Secret hand shake to get to AP mode.
 - [x] Statically compiled display skins.
 - [x] Circular layout and simulation on the square display.
-- [ ] Add servers and stations.
-- [ ] list servers and stations.
-- [ ] Disable stations.
+- [x] Live station browser, filters and browser previews.
+- [x] Add, save and remove custom stations.
+- [ ] Show directory-server details in settings.
+- [x] Mute and re-enable saved stations.
 - [ ] Off timers. (Bed Meals)
 - [ ] RTC support.
 - [ ] NTP support.
@@ -86,15 +87,67 @@ The display has previous/next station, volume down/up, OFF, and TUNE controls. O
 
 Wi-Fi provisioning and playback require a compatible ESP32-C6 ESP-Hosted slave image. The P4 host dependencies are pinned in [`main/idf_component.yml`](main/idf_component.yml). Waveshare's published examples do not include the C6 image, so a board with a missing or incompatible image cannot provide the setup AP until its C6 firmware is installed. The app reports that link failure on screen.
 
+### Station browser and saved stations
+
+Open **Stations** from the links near the top of Radio settings or Wi-Fi
+settings (`http://<hostname>.local/stations`). **Find stations** searches as
+names are typed, with country, language, genre/tag, codec, maximum bitrate,
+HTTPS and working-stream filters, sorting and pagination. **Radio-compatible
+only** filters each result page to AAC HLS, direct AAC and MP3 entries; use Next results to inspect
+more matches or disable that filter to preview other codecs.
+
+**Listen here** plays a preview on your phone/computer without changing the
+radio's audio. Stop it beside the station or in the preview controls. HLS uses
+native browser support or HLS.js 1.7.3, loaded on demand from jsDelivr. Browser
+codec support, stream availability and CORS can prevent a preview; Open stream
+provides a direct link. A browser preview is not proof the radio can decode it.
+The radio supports continuous HTTP MP3/AAC (including AAC+) and unencrypted AAC in MPEG-TS or packed ADTS HLS, not
+encrypted HLS or fragmented MP4. Unsupported formats cannot be added through
+this browser.
+
+**Add to radio** saves a compatible entry in NVS. The five presets plus up to
+19 added stations share 24 stable slots; available NVS space and URL lengths
+can impose a lower limit. If storage is full, the save fails visibly and the
+current list stays active. If NVS space is exhausted, TUNE can clear the separate
+stream cache before retrying; it retains the station list. No NVS partition
+erase is needed to manage stations.
+
+**My stations** lists enabled and muted entries, with local name/status filters.
+**Mute** removes an entry from the radio's previous/next navigation while
+keeping it in settings. **Enable** restores it. Added stations also have a
+**Remove** button; presets can only be muted. Muting/deleting the playing
+station selects another enabled entry. If all are muted, playback stops and the
+screen asks for a station to be enabled. The catalog, mute states and selection
+survive reboot; TUNE clears stream caches without deleting this list.
+
+Searches and preview streams go directly from the browser to the directory and
+broadcaster. The radio must be connected to Wi-Fi to discover directory servers;
+saved-list management remains available on the setup AP. Discovery runs in a
+background task and can run while the radio is OFF. Station edits are committed
+to one versioned NVS blob before the live catalog changes. Stable entry IDs and
+cache-owner tags prevent a newly added station from inheriting a removed one's
+stream when its slot is reused. Custom entries refresh by Radio Browser UUID,
+with the saved chosen URL as a fallback; BBC rate variants remain preset-only.
+
 ### Station discovery and stream cache
 
-On first selection, the firmware searches Radio Browser for the preset's exact name (case insensitive), trying two directory servers. It considers AAC HLS results and retains a BBC worldwide 96 kbit/s URL as a fallback. The existing five station names remain the presets; this does not add a text search interface. Directory API: https://api.radio-browser.info/
+On first selection, the firmware searches Radio Browser for the preset's exact name (case insensitive), using a dynamically discovered directory server list. It considers AAC HLS, direct AAC and MP3 results and retains a BBC worldwide 96 kbit/s URL as a fallback. The five BBC presets remain available alongside added stations; the web Stations page provides live text search. Directory API: https://api.radio-browser.info/
+
+The server list follows [Radio Browser's documented DNS SRV alternative](https://api.radio-browser.info/):
+query `_api._tcp.radio-browser.info` through the network's configured DNS servers,
+use the returned hostnames and ports for HTTPS, shuffle the list, then try the
+next server if a request fails or yields no usable streams. No directory hostnames
+are hardcoded. A fresh directory search performs a fresh lookup; a working cached
+stream starts without contacting DNS or the directory. If discovery fails, the
+existing bitrate-limited BBC stream fallbacks remain available. Truncated DNS
+responses are retried over TCP. DNS replies are bounded to 4 KB and validated
+before their hostnames are used.
 
 A stream is saved in the `streams96` NVS namespace after 30 seconds of decoded PCM audio has been accepted by the speaker driver without a reported decode or output error. Playlist or segment download failures reset that qualification period. Saved URLs survive reboot and are tried before searching again. This is a software health check, not a measurement of audible quality.
 
 Decode/output errors, unsupported segment formats, or 30 seconds without audio cause the player to try the next candidate. A failing cached URL is removed. After all candidates fail, the directory is searched again. Playback also retries after Wi-Fi reconnects. Search is performed when a station is selected, not as a background scan of every preset.
 
-The player supports unencrypted AAC in MPEG-TS HLS, including basic master playlists. MP3, direct continuous AAC, encrypted HLS, and fragmented MP4 are not supported and are not intentionally cached. Changing preset names/order in firmware should be accompanied by clearing the `streams96` namespace, since cache keys identify preset slots.
+The player supports continuous HTTP MP3/AAC (including AAC+) and unencrypted AAC in MPEG-TS or packed ADTS HLS, including basic master playlists. M3U/PLS links and HTTP redirects are resolved with bounded nesting; ICY metadata is stripped before decoding. Encrypted HLS, fragmented MP4, Ogg and Opus are not supported and are not intentionally cached. Changing preset names/order in firmware should be accompanied by clearing the `streams96` namespace, since cache keys identify preset slots.
 
 Use ESP-IDF 6.1 (or a compatible ESP-IDF release supported by the pinned components):
 
@@ -195,7 +248,7 @@ After adding these changes, run `idf.py update-dependencies` and `idf.py build` 
 
 Wi-Fi joins have a 30-second overall deadline, including DHCP, in addition to the disconnect retry limit. This applies after submitting setup details and at saved-network startup. On timeout, the pending join is disconnected and automatic retries stop; the AP setup/QR screen returns. Submitting revised details starts a fresh deadline. Successful IP acquisition cancels the deadline. A separate watchdog task enforces it even if no disconnect event arrives.
 
-Captive interception code is removed: no wildcard DNS responder, catch-all HTTP route, redirects, or captive-probe endpoints are installed. The setup server matches only `/`, `/api/scan`, `/connect`, `/connecting`, `/api/connection`, `/wifi`, and `/settings`; other URLs receive the normal HTTP not-found response. Clients join `p4Radio-Setup`, then scan the hostname URL QR or manually open `http://<hostname>.local/`. The same bookmark works on the home network through mDNS. `http://192.168.4.1/` remains an AP-only fallback. The AP has no internet access.
+Captive interception code is removed: no wildcard DNS responder, catch-all HTTP route, redirects, or captive-probe endpoints are installed. The setup server matches the registered settings, Wi-Fi and Stations routes; other URLs receive the normal HTTP not-found response. Clients join `p4Radio-Setup`, then scan the hostname URL QR or manually open `http://<hostname>.local/`. The same bookmark works on the home network through mDNS. `http://192.168.4.1/` remains an AP-only fallback. The AP has no internet access.
 
 Successful setup submissions use HTTP 303 to redirect from POST `/connect` to GET `/connecting`. Refreshing that page does not save credentials again or restart the Wi-Fi join deadline.
 
@@ -247,17 +300,13 @@ The second setup QR goes directly to `http://<hostname>.local/wifi`, with `http:
 
 The hostname header is an underlined `http://<hostname>.local/` link. Tapping it plays button feedback and shows a settings URL QR without interrupting playback. Tapping anywhere on the QR screen plays button feedback once and returns to the radio screen. Dismissed automatic setup QR screens remain hidden until the AP/client setup stage changes; the header can always reopen the settings QR from the normal screen. Automatic Wi-Fi QR codes still target `/wifi`.
 
-### Maximum stream bitrate
+### Desired stream bitrate
 
-Radio settings offers Unlimited (default), 24, 32, 48, 64, 96, 128, 160, 192, 256, and 320 kbit/s. The selected maximum is stored as `max_bitrate` in `p4radio` NVS. Saving a changed limit clears stream candidates/cache and retunes; saving other settings does not. A finite ceiling prefers the highest available rate within that ceiling; Unlimited selects the highest available advertised bitrate without a ceiling.
+Radio settings offers Unlimited (default), 24, 32, 48, 64, 96, 128, 160, 192, 256, and 320 kbit/s. The desired rate uses the existing `max_bitrate` NVS key. Saving a changed preference clears stream candidates/cache and retunes; saving other settings does not.
 
-Finite limits exclude directory entries with unknown or excessive advertised rates. BBC candidates include 320 and 128 kbit/s UK endpoints plus 96 and 48 kbit/s worldwide endpoints, filtered by the ceiling. Higher UK endpoints may be unavailable outside the UK. Lower limits than 48 have no BBC fallback. HLS variants must fit the limit using the nominal bitrate encoded in a BBC URL when present, otherwise their advertised average bandwidth/BANDWIDTH. This limits advertised audio rates, not instantaneous network traffic or variable-bitrate peaks. Cache entries are tagged with the limit under which they were qualified, so old unrestricted cache entries cannot bypass a finite limit after reboot. If no eligible stream is available, the radio displays a message and retries; increase the limit to restore more choices.
+Choose the highest known available rate at or below the preference. If none fit, choose the lowest known available rate, even if higher than requested. Unknown rates are tried last. Unlimited chooses the highest known rate. The same ordering applies to directory candidates and HLS master variants; alternative candidates are retained for failure recovery. For example, a 96 kbit/s preference allows Heart Gloucestershire's 128 kbit/s MP3 stream when no lower rate is available. BBC preferences below 48 kbit/s can still use the 48 kbit/s fallback.
 
-Stream cache revision 3 invalidates URLs selected by the old always-prefer-96 policy once after flashing. Finite bitrate ceilings now try the highest permitted directory or BBC candidate first, falling through to lower rates on failure.
-
-Cache revision 4 invalidates selections made under the former Unlimited-prefer-96 policy. Unlimited now ranks streams and HLS variants by highest advertised bitrate, including the BBC 320 kbit/s candidates. Displayed bitrate is measured and can differ slightly from the nominal value.
-
-**Show power meter** on the radio settings page controls the horizontal Wi-Fi/stream ratio meter. It defaults off, applies immediately after saving, and persists in bit 2 of the NVS `display_flags` value. Existing volume and buffer visibility settings are preserved.
+HLS selection uses the nominal bitrate encoded in a BBC URL when present, otherwise advertised average bandwidth/BANDWIDTH. The setting concerns encoded stream rates, not instantaneous network throughput. Cache entries remain tagged with the preference used during qualification. The Stations page's maximum-bitrate search filter is independent and starts unrestricted so higher-rate fallback stations remain visible. Existing saved settings and stations are retained.
 
 ### Main screen layout
 

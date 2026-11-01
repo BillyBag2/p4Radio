@@ -209,7 +209,7 @@ private:
 
     void refresh_theme() override
     {
-        if (dial_pointer_) lv_obj_set_x(dial_pointer_, 43 + g_station.load() * 129);
+        if (dial_pointer_) lv_obj_set_x(dial_pointer_, 43 + station_dial_position());
     }
 };
 

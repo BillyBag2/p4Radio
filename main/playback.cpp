@@ -1,12 +1,16 @@
 #include "radio.hpp"
 #include "button_audio.hpp"
 #include "buffer_sync.hpp"
+#include "stream_input.hpp"
+#include "station_rules.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
 #include "driver/gpio.h"
 #include "esp_audio_dec_default.h"
+#include "esp_aac_dec.h"
 #include "esp_audio_simple_dec.h"
 #include "esp_audio_simple_dec_default.h"
 #include "esp_heap_caps.h"
@@ -56,6 +60,8 @@ struct AudioBuffer {
     size_t bytes_per_second = 0;
     size_t frame_bytes = 0;
     int station = 0;
+    uint32_t station_id = 0;
+    const char *station_name = nullptr; // Owned by play_stream's Station until output joins.
     std::atomic<bool> stop{false};
     std::atomic<bool> error{false};
     std::atomic<uint32_t> played_ms{0};
@@ -66,7 +72,7 @@ struct AudioBuffer {
 bool audio_cancelled(const AudioBuffer &buffer)
 {
     return buffer.stop.load() || g_scan_requested.load() || g_sleep_requested.load() ||
-        !g_playback_requested.load() || g_station.load() != buffer.station;
+        !g_playback_requested.load() || g_station.load() != buffer.station || g_station_token.load() != buffer.station_id;
 }
 
 void audio_output_task(void *argument)
@@ -106,7 +112,7 @@ void audio_output_task(void *argument)
             matcher.reset();
             last_control = xTaskGetTickCount();
             set_stream_loading_sound(false);
-            set_status((std::string("Playing ") + kStations[buffer.station].name).c_str());
+            set_status((std::string("Playing ") + buffer.station_name).c_str());
         }
         if (xTaskGetTickCount() - last_control >= pdMS_TO_TICKS(1000)) {
             controller.update(static_cast<float>(available) / buffer.bytes_per_second, kAudioBufferTargetSeconds);
@@ -159,21 +165,30 @@ bool play_stream(const Station &station, int station_index)
     set_status((std::string("Loading ") + station.name).c_str());
     const std::string playlist_url = resolve_station_url(station, station_index);
     if (playlist_url.empty()) {
-        set_status("No streams within bitrate limit; change settings");
+        set_status("No supported streams found; retrying");
         for (int i = 0; i < 100 && !g_scan_requested.load() && !g_sleep_requested.load() && g_station.load() == station_index; ++i)
             vTaskDelay(pdMS_TO_TICKS(100));
+        return false;
+    }
+    StreamInput source;
+    if (!source.open(playlist_url, station, station_index)) {
+        if (!g_sleep_requested.load() && g_station_token.load() == station.id) ++g_candidate_index[station_index];
+        set_status("Stream unavailable or unsupported format");
         return false;
     }
     esp_audio_dec_register_default();
     esp_audio_simple_dec_register_default();
     esp_audio_simple_dec_cfg_t decoder_config{};
-    decoder_config.dec_type = ESP_AUDIO_SIMPLE_DEC_TYPE_AAC;
+    decoder_config.dec_type = source.mp3 ? ESP_AUDIO_SIMPLE_DEC_TYPE_MP3 : ESP_AUDIO_SIMPLE_DEC_TYPE_AAC;
     decoder_config.use_frame_dec = false;
+    esp_aac_dec_cfg_t aac_config{};
+    aac_config.aac_plus_enable = true;
+    if (!source.mp3) { decoder_config.dec_cfg = &aac_config; decoder_config.cfg_size = sizeof(aac_config); }
     esp_audio_simple_dec_handle_t decoder = nullptr;
     if (esp_audio_simple_dec_open(&decoder_config, &decoder) != ESP_AUDIO_ERR_OK) {
         esp_audio_simple_dec_unregister_default();
         esp_audio_dec_unregister_default();
-        set_status("AAC decoder could not start");
+        set_status("Audio decoder could not start");
         return false;
     }
     constexpr size_t output_size = 8192;
@@ -193,6 +208,8 @@ bool play_stream(const Station &station, int station_index)
 
     AudioBuffer audio;
     audio.station = station_index;
+    audio.station_id = station.id;
+    audio.station_name = station.name.c_str();
     bool output_task_started = false;
     bool audio_open = false;
     bool first_audio = true;
@@ -200,118 +217,122 @@ bool play_stream(const Station &station, int station_index)
     bool cached = cached_stream(station_index) == playlist_url;
     TickType_t last_audio_tick = xTaskGetTickCount();
     std::string last_segment;
-    std::string media_url = playlist_url;
+    std::string media_url = source.url;
     int playlist_depth = 0;
-    while (g_connected.load() && g_playback_requested.load() && !g_scan_requested.load() && !g_sleep_requested.load() && g_station.load() == station_index) {
+    size_t direct_pending = 0;
+    while (g_connected.load() && g_playback_requested.load() && !g_scan_requested.load() && !g_sleep_requested.load() && g_station.load() == station_index && g_station_token.load() == station.id) {
         if (audio.error.load()) { failed = true; break; }
         const TickType_t last_progress = output_task_started ? audio.last_output.load() : last_audio_tick;
         if (xTaskGetTickCount() - last_progress > pdMS_TO_TICKS(30000)) { failed = true; break; }
         const int limit = g_max_bitrate_kbps.load();
-        if (limit > 0 && stream_url_bitrate(media_url) > limit) {
-            set_status("Stream exceeds bitrate limit");
-            failed = true;
-            break;
-        }
-        const std::string playlist = fetch_hls_playlist(media_url);
-        std::array<std::string, kMaxHlsSegments> segments{};
-        const size_t segment_count = parse_hls_segments(playlist, media_url, segments);
-        if (playlist.find("#EXT-X-STREAM-INF:") != std::string::npos && segment_count) {
-            if (++playlist_depth > 3) { failed = true; break; }
-            // Prefer the highest permitted rate; Unlimited applies no ceiling.
-            size_t position = 0;
-            int best_distance = 2147483647;
-            std::string best;
-            while ((position = playlist.find("#EXT-X-STREAM-INF:", position)) != std::string::npos) {
-                const size_t end = playlist.find('\n', position);
-                if (end == std::string::npos) break;
-                const std::string attributes = playlist.substr(position, end - position);
-                size_t rate_pos = attributes.find("AVERAGE-BANDWIDTH=");
-                size_t prefix = 18;
-                if (rate_pos == std::string::npos) { rate_pos = attributes.find("BANDWIDTH="); prefix = 10; }
-                const long rate = rate_pos == std::string::npos ? 0 : std::strtol(attributes.c_str() + rate_pos + prefix, nullptr, 10);
-                const size_t uri_end = playlist.find('\n', end + 1);
-                std::string uri = playlist.substr(end + 1, uri_end == std::string::npos ? uri_end : uri_end - end - 1);
-                if (!uri.empty() && uri.back() == '\r') uri.pop_back();
-                const std::string variant_url = make_hls_segment_url(media_url, uri);
-                const int nominal = stream_url_bitrate(variant_url);
-                const bool permitted = limit == 0 || (nominal > 0 ? nominal <= limit : rate > 0 && rate <= limit * 1000L);
-                const long selection_rate = nominal > 0 ? nominal * 1000L : rate;
-                const int score = -static_cast<int>(std::min(selection_rate, 100000000L));
-                if (permitted && rate > 0 && rate < 100000000 && !uri.empty() && uri.front() != '#' && score < best_distance) {
-                    best_distance = score;
-                    best = make_hls_segment_url(media_url, uri);
+        size_t aac_size = 0;
+        if (!source.hls) {
+            const int count = source.read(aac_data + direct_pending, 4096);
+            if (count <= 0) { failed = true; break; }
+            aac_size = direct_pending + count;
+        } else {
+            const std::string playlist = source.playlist.empty() ? fetch_hls_playlist(media_url) : std::exchange(source.playlist, {});
+            std::array<std::string, kMaxHlsSegments> segments{};
+            const size_t segment_count = parse_hls_segments(playlist, media_url, segments);
+            if (playlist.find("#EXT-X-STREAM-INF:") != std::string::npos && segment_count) {
+                if (++playlist_depth > 3) { failed = true; break; }
+                // Prefer a rate at/below the target; otherwise use the lowest above it.
+                size_t position = 0;
+                int64_t best_rate = 0;
+                std::string best;
+                while ((position = playlist.find("#EXT-X-STREAM-INF:", position)) != std::string::npos) {
+                    const size_t end = playlist.find('\n', position);
+                    if (end == std::string::npos) break;
+                    const std::string attributes = playlist.substr(position, end - position);
+                    size_t rate_pos = attributes.find("AVERAGE-BANDWIDTH=");
+                    size_t prefix = 18;
+                    if (rate_pos == std::string::npos) { rate_pos = attributes.find("BANDWIDTH="); prefix = 10; }
+                    const long rate = rate_pos == std::string::npos ? 0 : std::strtol(attributes.c_str() + rate_pos + prefix, nullptr, 10);
+                    const size_t uri_end = playlist.find('\n', end + 1);
+                    std::string uri = playlist.substr(end + 1, uri_end == std::string::npos ? uri_end : uri_end - end - 1);
+                    if (!uri.empty() && uri.back() == '\r') uri.pop_back();
+                    const std::string variant_url = make_hls_segment_url(media_url, uri);
+                    const int nominal = stream_url_bitrate(variant_url);
+                    const long selection_rate = nominal > 0 ? nominal * 1000L : rate;
+                    if (rate >= 0 && rate < 100000000 && !uri.empty() && uri.front() != '#' &&
+                        (best.empty() || station_rules::prefer_bitrate(selection_rate, best_rate, limit * 1000LL))) {
+                        best_rate = selection_rate;
+                        best = make_hls_segment_url(media_url, uri);
+                    }
+                    position = end + 1;
                 }
-                position = end + 1;
+                if (best.empty()) {
+                    set_status("No usable HLS variant found");
+                    failed = true;
+                    break;
+                }
+                media_url = best;
+                continue;
             }
-            if (best.empty()) {
-                set_status("No HLS variant within bitrate limit");
+            if (playlist.find("#EXT-X-KEY:") != std::string::npos || playlist.find("#EXT-X-MAP:") != std::string::npos) {
+                ESP_LOGW(kTag, "Encrypted or fragmented MP4 HLS is unsupported");
                 failed = true;
                 break;
             }
-            media_url = best;
-            continue;
-        }
-        if (playlist.find("#EXT-X-KEY:") != std::string::npos || playlist.find("#EXT-X-MAP:") != std::string::npos) {
-            ESP_LOGW(kTag, "Encrypted or fragmented MP4 HLS is unsupported");
-            failed = true;
-            break;
-        }
-        if (!segment_count) {
-            audio.played_ms.store(0);
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            continue;
-        }
+            if (!segment_count) {
+                audio.played_ms.store(0);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
 
-        // Start one published segment behind the live edge so the producer can
-        // immediately fetch ahead instead of waiting for the next publication.
-        size_t segment_index = last_segment.empty() && segment_count > 1 ? segment_count - 2 : segment_count - 1;
-        bool wait_for_next = false;
-        if (!last_segment.empty()) {
-            for (size_t i = 0; i < segment_count; ++i) {
-                if (segments[i] == last_segment) {
-                    if (i + 1 < segment_count) segment_index = i + 1;
-                    else wait_for_next = true;
-                    break;
+            // Start one published segment behind the live edge so the producer can
+            // immediately fetch ahead instead of waiting for the next publication.
+            size_t segment_index = last_segment.empty() && segment_count > 1 ? segment_count - 2 : segment_count - 1;
+            bool wait_for_next = false;
+            if (!last_segment.empty()) {
+                for (size_t i = 0; i < segment_count; ++i) {
+                    if (segments[i] == last_segment) {
+                        if (i + 1 < segment_count) segment_index = i + 1;
+                        else wait_for_next = true;
+                        break;
+                    }
                 }
             }
-        }
-        if (wait_for_next) {
-            vTaskDelay(pdMS_TO_TICKS(500));
-            continue;
-        }
+            if (wait_for_next) {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                continue;
+            }
 
-        size_t transport_size = 0;
-        if (!download_hls_segment(segments[segment_index], transport_stream, kHlsSegmentMaxSize, transport_size)) {
-            audio.played_ms.store(0);
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            continue;
-        }
-        last_segment = segments[segment_index];
-        size_t aac_size = 0;
-        if (!extract_aac_from_mpeg_ts(transport_stream, transport_size, aac_data, kHlsSegmentMaxSize, aac_size)) {
-            ESP_LOGE(kTag, "Could not extract AAC from HLS segment (%u bytes)", static_cast<unsigned>(transport_size));
-            set_status("BBC segment format not recognized");
-            failed = true;
-            break;
-        }
+            size_t transport_size = 0;
+            if (!download_hls_segment(segments[segment_index], transport_stream, kHlsSegmentMaxSize, transport_size)) {
+                audio.played_ms.store(0);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                continue;
+            }
+            last_segment = segments[segment_index];
+            if (!extract_aac_from_mpeg_ts(transport_stream, transport_size, aac_data, kHlsSegmentMaxSize, aac_size)) {
+                ESP_LOGE(kTag, "Could not extract AAC from HLS segment (%u bytes)", static_cast<unsigned>(transport_size));
+                ESP_LOGE(kTag, "Segment prefix: %02x %02x %02x %02x", transport_size > 0 ? transport_stream[0] : 0,
+                         transport_size > 1 ? transport_stream[1] : 0, transport_size > 2 ? transport_stream[2] : 0,
+                         transport_size > 3 ? transport_stream[3] : 0);
+                set_status("Stream segment format not supported");
+                failed = true;
+                break;
+            }
 
+        } // HLS or continuous input shares the decoder and PCM output path.
         esp_audio_simple_dec_raw_t raw{};
         raw.buffer = aac_data;
         raw.len = aac_size;
         uint64_t segment_audio_us = 0;
-        while (raw.len && !g_scan_requested.load() && !g_sleep_requested.load() && g_station.load() == station_index) {
+        while (raw.len && !g_scan_requested.load() && !g_sleep_requested.load() && g_station.load() == station_index && g_station_token.load() == station.id) {
             esp_audio_simple_dec_out_t decoded{};
             decoded.buffer = output;
             decoded.len = output_size;
             const esp_audio_err_t decode_result = esp_audio_simple_dec_process(decoder, &raw, &decoded);
             if (decode_result == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
-                set_status("AAC frame exceeds decoder buffer");
+                set_status("Audio frame exceeds decoder buffer");
                 failed = true;
                 raw.len = 0;
                 break;
             }
             if (decode_result != ESP_AUDIO_ERR_OK) {
-                ESP_LOGW(kTag, "AAC decode returned %d", decode_result);
+                ESP_LOGW(kTag, "Audio decode returned %d", decode_result);
                 failed = true;
                 raw.len = 0;
                 break;
@@ -327,6 +348,7 @@ bool play_stream(const Station &station, int station_index)
                         break;
                     }
                     g_stream_channels.store(info.channel);
+                    if (info.bitrate) g_stream_kbps.store(station_rules::decoder_bitrate_kbps(info.bitrate));
                     audio.frame_bytes = info.channel * (info.bits_per_sample / 8);
                     audio.bytes_per_second = static_cast<size_t>(info.sample_rate) * audio.frame_bytes;
                     if (!audio.frame_bytes || !audio.bytes_per_second || audio.bytes_per_second > 768000) {
@@ -346,7 +368,7 @@ bool play_stream(const Station &station, int station_index)
                     output_task_started = true;
                     audio_open = true;
                     first_audio = false;
-                    ESP_LOGI(kTag, "Playing %s as AAC HLS", station.name);
+                    ESP_LOGI(kTag, "Playing %s as %s %s", station.name.c_str(), source.mp3 ? "MP3" : "AAC", source.hls ? "HLS" : "HTTP");
                     set_status("Priming audio buffer...");
                 }
                 if (audio_open) {
@@ -369,9 +391,9 @@ bool play_stream(const Station &station, int station_index)
                         segment_audio_us += duration;
                     }
                     if (!cached && audio.played_ms.load() >= 30000 && !audio.error.load()) {
-                        cache_stream(station_index, playlist_url);
+                        cache_stream(station_index, playlist_url, station.id);
                         cached = true;
-                        ESP_LOGI(kTag, "Cached verified stream for %s", station.name);
+                        ESP_LOGI(kTag, "Cached verified stream for %s", station.name.c_str());
                     }
                 }
             }
@@ -380,10 +402,18 @@ bool play_stream(const Station &station, int station_index)
             raw.buffer += raw.consumed;
             raw.consumed = 0;
         }
-        if (!failed && segment_audio_us) g_stream_kbps.store(static_cast<int>(static_cast<uint64_t>(aac_size) * 8000 / segment_audio_us));
+        if (!source.hls && !failed) {
+            direct_pending = raw.len;
+            if (direct_pending > 32768) { failed = true; break; }
+            if (direct_pending) std::memmove(aac_data, raw.buffer, direct_pending);
+            esp_audio_simple_dec_info_t info{};
+            if (esp_audio_simple_dec_get_info(decoder, &info) == ESP_AUDIO_ERR_OK && info.bitrate)
+                g_stream_kbps.store(station_rules::decoder_bitrate_kbps(info.bitrate));
+        }
+        if (source.hls && !failed && segment_audio_us) g_stream_kbps.store(static_cast<int>(static_cast<uint64_t>(aac_size) * 8000 / segment_audio_us));
         if (failed) break;
         if (!first_audio && !audio_open) {
-            set_status("AAC audio output could not start");
+            set_status("Audio output could not start");
             break;
         }
     }
@@ -402,8 +432,8 @@ bool play_stream(const Station &station, int station_index)
     heap_caps_free(transport_stream);
     heap_caps_free(aac_data);
     heap_caps_free(output);
-    if (failed && g_connected.load() && g_station.load() == station_index && g_playback_requested.load()) {
-        if (cached) cache_stream(station_index, {});
+    if (failed && g_connected.load() && g_station.load() == station_index && g_station_token.load() == station.id && g_playback_requested.load()) {
+        if (cached) cache_stream(station_index, {}, station.id);
         ++g_candidate_index[station_index];
         set_status("Stream failed; trying another source");
     }
@@ -412,6 +442,7 @@ bool play_stream(const Station &station, int station_index)
 
 void playback_task(void *)
 {
+    bool empty_stations_reported = false;
     while (true) {
         if (g_sleep_requested.load()) {
             // Audio output has joined and released the codec. Keep LVGL, touch
@@ -430,8 +461,10 @@ void playback_task(void *)
                 vTaskDelay(pdMS_TO_TICKS(20));
             }
             g_idle_ready.store(false);
+            empty_stations_reported = false;
         }
         if (g_scan_requested.exchange(false)) {
+            empty_stations_reported = false;
             // Playback has returned and released its decoder, speaker and HTTP clients.
             nvs_handle_t cache;
             esp_err_t result = nvs_open("streams96", NVS_READWRITE, &cache);
@@ -443,7 +476,6 @@ void playback_task(void *)
             }
             for (auto &candidates : g_candidates) candidates.clear();
             g_candidate_index.fill(0);
-            g_url_bitrates.clear();
             g_stream_kbps.store(0);
             g_download_kbps.store(0);
             if (result != ESP_OK) {
@@ -456,6 +488,7 @@ void playback_task(void *)
             }
         }
         if (!g_connected.load() || !g_playback_requested.load()) {
+            empty_stations_reported = false;
             vTaskDelay(pdMS_TO_TICKS(250));
             continue;
         }
@@ -463,7 +496,15 @@ void playback_task(void *)
             test_internet_connection();
         }
         const int selected = g_station.load();
-        play_stream(kStations[selected], selected);
+        const Station station = station_copy(selected);
+        if (!station.id || !station.enabled) {
+            if (!empty_stations_reported) set_status("No stations enabled; open Stations in settings");
+            empty_stations_reported = true;
+            vTaskDelay(pdMS_TO_TICKS(250));
+            continue;
+        }
+        empty_stations_reported = false;
+        play_stream(station, selected);
         // Retain retry backoff, but do not make STOP/wake wait a full second.
         for (int i = 0; i < 50 && !g_sleep_requested.load(); ++i)
             vTaskDelay(pdMS_TO_TICKS(20));

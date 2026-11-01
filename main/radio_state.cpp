@@ -3,6 +3,7 @@
 namespace p4radio {
 
 std::atomic<int> g_station{0};
+std::atomic<uint32_t> g_station_token{0};
 std::atomic<int> g_volume{5};
 std::atomic<int> g_max_bitrate_kbps{0};
 std::atomic<bool> g_show_volume_bar{false};
@@ -31,11 +32,10 @@ std::atomic<int> g_stream_kbps{0};
 std::atomic<int> g_stream_channels{0};
 std::atomic<int> g_download_kbps{0};
 std::atomic<int64_t> g_download_time{0};
-std::map<std::string, int> g_url_bitrates;
 portMUX_TYPE g_status_mux = portMUX_INITIALIZER_UNLOCKED;
 char g_saved_ssid[33] = {};
 char g_saved_password[65] = {};
-std::array<std::vector<std::string>, kStationCount> g_candidates;
-std::array<size_t, kStationCount> g_candidate_index{};
+std::array<std::vector<std::string>, kMaxStations> g_candidates;
+std::array<size_t, kMaxStations> g_candidate_index{};
 
 } // namespace p4radio
