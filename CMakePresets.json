@@ -1,0 +1,50 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 22,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "waveshare86",
+      "displayName": "Waveshare ESP32-P4-86-Panel-ETH-2RO",
+      "generator": "Ninja",
+      "binaryDir": "build/waveshare86",
+      "environment": {
+        "MY_BOARD": "waveshare86"
+      },
+      "cacheVariables": {
+        "SDKCONFIG": "build/waveshare86/sdkconfig",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.waveshare86"
+      }
+    },
+    {
+      "name": "tab5",
+      "displayName": "M5Stack TAB5",
+      "generator": "Ninja",
+      "binaryDir": "build/tab5",
+      "environment": {
+        "MY_BOARD": "tab5"
+      },
+      "cacheVariables": {
+        "SDKCONFIG": "build/tab5/sdkconfig",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.tab5"
+      }
+    },
+    {
+      "name": "waveshare185c",
+      "displayName": "Waveshare ESP32-S3-Touch-LCD-1.85C",
+      "generator": "Ninja",
+      "binaryDir": "build/waveshare185c",
+      "environment": {
+        "MY_BOARD": "waveshare185c"
+      },
+      "cacheVariables": {
+        "SDKCONFIG": "build/waveshare185c/sdkconfig",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.waveshare185c",
+        "IDF_TARGET": "esp32p4"
+      }
+    }
+  ]
+}

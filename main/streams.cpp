@@ -2,6 +2,7 @@
 #include "radio_browser_dns.hpp"
 #include "station_rules.hpp"
 #include "hls_aac.hpp"
+#include "hls_http.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -12,6 +13,7 @@
 #include "esp_timer.h"
 #include "esp_crt_bundle.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "nvs.h"
 
 namespace p4radio {
@@ -121,6 +123,13 @@ esp_http_client_handle_t open_http_get(const std::string &url, int &status_code,
     }
     error = esp_http_client_open(client, 0);
     if (error != ESP_OK) {
+        // A generic HTTP connect error can hide TLS allocation failure. Report
+        // contiguous capacity as well as free totals to expose fragmentation.
+        ESP_LOGW(kTag, "HTTP connect heap: internal free/largest %u/%u; PSRAM free/largest %u/%u bytes",
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)));
         esp_http_client_cleanup(client);
         return nullptr;
     }
@@ -239,20 +248,91 @@ std::string resolve_station_url(const Station &station, int index)
     return urls.empty() ? std::string{} : urls.front();
 }
 
-std::string fetch_hls_playlist(const std::string &url)
+HlsHttpSession::~HlsHttpSession()
 {
-    int status_code = 0;
-    esp_err_t error = ESP_OK;
-    esp_http_client_handle_t client = open_http_get(url, status_code, error);
-    if (!client) {
-        ESP_LOGE(kTag, "HLS playlist request failed: %s (HTTP %d)", esp_err_to_name(error), status_code);
-        return {};
+    if (client_) esp_http_client_cleanup(client_);
+}
+
+esp_err_t HlsHttpSession::event(esp_http_client_event_t *event)
+{
+    auto &self = *static_cast<HlsHttpSession *>(event->user_data);
+    if (event->event_id == HTTP_EVENT_ON_CONNECTED) ++self.connections_;
+    if (event->event_id == HTTP_EVENT_ON_DATA && event->data_len > 0 &&
+        esp_http_client_get_status_code(event->client) == 200) {
+        const size_t count = static_cast<size_t>(event->data_len);
+        if (count > self.capacity_ - self.size_) {
+            self.overflow_ = true;
+            return ESP_FAIL;
+        }
+        std::memcpy(self.destination_ + self.size_, event->data, count);
+        self.size_ += count;
     }
-    std::string body = read_http_body(client, 16384);
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
+    return ESP_OK;
+}
+
+bool HlsHttpSession::get(const char *purpose, const std::string &url, void *destination, size_t capacity, size_t &size)
+{
+    destination_ = static_cast<char *>(destination);
+    capacity_ = capacity;
+    size = size_ = 0;
+    connections_ = 0;
+    overflow_ = false;
+    const int64_t started = esp_timer_get_time();
+    esp_err_t error = ESP_ERR_NO_MEM;
+    if (!client_) {
+        esp_http_client_config_t config{};
+        config.url = url.c_str();
+        config.timeout_ms = 15000;
+        // These HTTP staging buffers use ordinary malloc, independently of the
+        // TLS PSRAM setting. Two persistent clients must leave SRAM for Wi-Fi,
+        // audio and DMA. Body delivery remains streamed into the caller's buffer.
+        config.buffer_size = 2048;
+        config.buffer_size_tx = 1024;
+        config.crt_bundle_attach = esp_crt_bundle_attach;
+        config.user_agent = "p4Radio/1.0 ESP-IDF";
+        config.keep_alive_enable = true;
+        config.event_handler = event;
+        config.user_data = this;
+        client_ = esp_http_client_init(&config);
+    }
+    if (client_) {
+        error = esp_http_client_set_url(client_, url.c_str());
+        if (error == ESP_OK) error = esp_http_client_perform(client_);
+    }
+    const int status = client_ ? esp_http_client_get_status_code(client_) : 0;
+    const bool ok = error == ESP_OK && status == 200 && !overflow_ &&
+        esp_http_client_is_complete_data_received(client_);
+    ESP_LOGI(kTag, "HLS HTTP %s: %lld ms, %u bytes, new connections: %u, HTTP %d, %s%s", purpose,
+             static_cast<long long>((esp_timer_get_time() - started) / 1000),
+             static_cast<unsigned>(size_), connections_, status, esp_err_to_name(error),
+             overflow_ ? ", response too large" : "");
+    if (ok) size = size_;
+    else {
+        // Measure before cleanup: releasing HTTP/TLS buffers can hide the
+        // contiguous-memory shortage that actually caused this failure.
+        ESP_LOGW(kTag, "HLS request failed before cleanup; internal free/largest %u/%u; "
+                 "DMA free/largest %u/%u; PSRAM free/largest %u/%u",
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)),
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)));
+        if (client_) esp_http_client_cleanup(client_);
+        client_ = nullptr;
+    }
+    destination_ = nullptr;
+    return ok;
+}
+
+std::string fetch_hls_playlist(HlsHttpSession &session, const std::string &url)
+{
+    std::string body(16384, '\0');
+    size_t size = 0;
+    if (!session.get("playlist", url, body.data(), body.size(), size)) return {};
+    body.resize(size);
     if (body.find("#EXTM3U") == std::string::npos) {
-        ESP_LOGE(kTag, "HLS endpoint returned an invalid playlist (HTTP %d)", status_code);
+        ESP_LOGE(kTag, "HLS endpoint returned an invalid playlist");
         return {};
     }
     return body;
@@ -289,34 +369,11 @@ size_t parse_hls_segments(const std::string &playlist, const std::string &playli
     return count;
 }
 
-bool download_hls_segment(const std::string &url, uint8_t *buffer, size_t capacity, size_t &size)
+bool download_hls_segment(HlsHttpSession &session, const std::string &url, uint8_t *buffer, size_t capacity, size_t &size)
 {
     const int64_t started = esp_timer_get_time();
     size = 0;
-    int status_code = 0;
-    esp_err_t error = ESP_OK;
-    esp_http_client_handle_t client = open_http_get(url, status_code, error);
-    if (!client) {
-        ESP_LOGE(kTag, "HLS segment request failed: %s (HTTP %d)", esp_err_to_name(error), status_code);
-        return false;
-    }
-    while (size < capacity) {
-        const int count = esp_http_client_read(client, reinterpret_cast<char *>(buffer + size),
-                                               std::min<size_t>(8192, capacity - size));
-        if (count == 0) break;
-        if (count < 0) {
-            ESP_LOGE(kTag, "HLS segment read failed: %d", count);
-            size = 0;
-            break;
-        }
-        size += static_cast<size_t>(count);
-    }
-    esp_http_client_close(client);
-    esp_http_client_cleanup(client);
-    if (size == capacity) {
-        ESP_LOGE(kTag, "HLS segment exceeded %u bytes", static_cast<unsigned>(capacity));
-        size = 0;
-    }
+    if (!session.get("segment", url, buffer, capacity, size)) return false;
     const int64_t elapsed = esp_timer_get_time() - started;
     if (size && elapsed > 0) {
         g_download_kbps.store(static_cast<int>(static_cast<uint64_t>(size) * 8000 / elapsed));

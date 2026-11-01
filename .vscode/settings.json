@@ -1,6 +1,7 @@
 {
   "C_Cpp.intelliSenseEngine": "default",
   "idf.extensionActivationMode": "always",
+  "idf.saveLastProjectConfiguration": true,
   "cmake.configureOnOpen": false,
   "cmake.configureOnEdit": false,
   "cmake.automaticReconfigure": false,
@@ -31,7 +32,7 @@
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=c:\\repos\\p4Radio\\build"
+    "--compile-commands-dir=c:\\repos\\p4Radio\\build\\waveshare86"
   ],
   "idf.flashType": "UART",
   "cSpell.words": [

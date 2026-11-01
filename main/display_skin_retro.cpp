@@ -1,5 +1,6 @@
 #include "display_skin.hpp"
 #include "radio.hpp"
+#include <algorithm>
 
 namespace p4radio {
 namespace {
@@ -57,13 +58,14 @@ void draw_wood(lv_event_t *event)
     lv_area_t bounds;
     lv_obj_get_coords(static_cast<lv_obj_t *>(lv_event_get_current_target(event)), &bounds);
     lv_layer_t *layer = lv_event_get_layer(event);
+    const auto px = [&](int value) { return skin_coordinate(value, lv_area_get_width(&bounds), 684); };
     // Sparse grain keeps the cabinet warm without noisy text backgrounds.
     for (int y = 48; y < 650; y += 17) {
         const int inset = 20 + (y % 5) * 3;
-        line(layer, bounds.x1 + inset, bounds.y1 + y,
-             bounds.x2 - inset, bounds.y1 + y, 0xd39b59, 24);
-        line(layer, bounds.x1 + inset + 12, bounds.y1 + y + 2,
-             bounds.x2 - inset - 8, bounds.y1 + y + 2, 0x170c06, 50);
+        line(layer, bounds.x1 + px(inset), bounds.y1 + px(y),
+             bounds.x2 - px(inset), bounds.y1 + px(y), 0xd39b59, 24);
+        line(layer, bounds.x1 + px(inset + 12), bounds.y1 + px(y + 2),
+             bounds.x2 - px(inset + 8), bounds.y1 + px(y + 2), 0x170c06, 50);
     }
 }
 
@@ -74,13 +76,16 @@ void draw_cloth(lv_event_t *event)
     lv_layer_t *layer = lv_event_get_layer(event);
     // Crossing light/dark yarns produce a woven grille without bitmap assets
     // or hundreds of LVGL objects. All yarns stay inside the rounded frame.
-    for (int x = bounds.x1 + 20; x <= bounds.x2 - 20; x += 8) {
-        line(layer, x, bounds.y1 + 20, x, bounds.y2 - 20, 0xc2a16b, 160, 2);
-        line(layer, x + 3, bounds.y1 + 20, x + 3, bounds.y2 - 20, 0x2c2115, 190);
+    const int inset = skin_coordinate(20, lv_area_get_width(&bounds), 612);
+    const int step_x = std::max(1, skin_coordinate(8, lv_area_get_width(&bounds), 612));
+    const int step_y = std::max(1, skin_coordinate(6, lv_area_get_height(&bounds), 198));
+    for (int x = bounds.x1 + inset; x <= bounds.x2 - inset; x += step_x) {
+        line(layer, x, bounds.y1 + inset, x, bounds.y2 - inset, 0xc2a16b, 160, 2);
+        line(layer, x + step_x * 3 / 8, bounds.y1 + inset, x + step_x * 3 / 8, bounds.y2 - inset, 0x2c2115, 190);
     }
-    for (int y = bounds.y1 + 20; y <= bounds.y2 - 20; y += 6) {
-        line(layer, bounds.x1 + 20, y, bounds.x2 - 20, y, 0xe0c48c, 95);
-        line(layer, bounds.x1 + 20, y + 2, bounds.x2 - 20, y + 2, 0x241a10, 150);
+    for (int y = bounds.y1 + inset; y <= bounds.y2 - inset; y += step_y) {
+        line(layer, bounds.x1 + inset, y, bounds.x2 - inset, y, 0xe0c48c, 95);
+        line(layer, bounds.x1 + inset, y + step_y / 3, bounds.x2 - inset, y + step_y / 3, 0x241a10, 150);
     }
 }
 
@@ -89,13 +94,15 @@ void draw_dial(lv_event_t *event)
     lv_area_t bounds;
     lv_obj_get_coords(static_cast<lv_obj_t *>(lv_event_get_current_target(event)), &bounds);
     lv_layer_t *layer = lv_event_get_layer(event);
+    const auto px = [&](int value) { return skin_coordinate(value, lv_area_get_width(&bounds), 612); };
+    const auto py = [&](int value) { return skin_coordinate(value, lv_area_get_height(&bounds), 150); };
     for (int tick = 0; tick <= 40; ++tick) {
-        const int x = bounds.x1 + 48 + tick * 516 / 40;
-        line(layer, x, bounds.y1 + (tick % 10 == 0 ? 130 : 138),
-             x, bounds.y1 + 144, 0x60401e, 210);
+        const int x = bounds.x1 + px(48 + tick * 516 / 40);
+        line(layer, x, bounds.y1 + py(tick % 10 == 0 ? 130 : 138),
+             x, bounds.y1 + py(144), 0x60401e, 210);
     }
-    line(layer, bounds.x1 + 48, bounds.y1 + 144,
-         bounds.x1 + 564, bounds.y1 + 144, 0x60401e, 210);
+    line(layer, bounds.x1 + px(48), bounds.y1 + py(144),
+         bounds.x1 + px(564), bounds.y1 + py(144), 0x60401e, 210);
 }
 
 class RetroSkin final : public DisplaySkin {
@@ -200,7 +207,6 @@ private:
         buffer_low_color_ = 0xe77843;
         for (lv_obj_t *bar : {buffer_bar_, volume_bar_}) {
             lv_obj_set_size(bar, 6, 176);
-            lv_obj_set_style_bg_color(bar, lv_color_hex(0x291b10), LV_PART_MAIN);
         }
         lv_obj_align(buffer_bar_, LV_ALIGN_TOP_LEFT, 32, 155);
         lv_obj_align(volume_bar_, LV_ALIGN_TOP_RIGHT, -32, 155);
@@ -209,7 +215,7 @@ private:
 
     void refresh_theme() override
     {
-        if (dial_pointer_) lv_obj_set_x(dial_pointer_, 43 + station_dial_position());
+        if (dial_pointer_) lv_obj_set_x(dial_pointer_, coordinate(43 + station_dial_position()));
     }
 };
 

@@ -1,6 +1,5 @@
 #include "radio.hpp"
 #include "button_audio.hpp"
-#include "driver/gpio.h"
 #include "esp_log.h"
 #include "freertos/task.h"
 #include "nvs.h"
@@ -30,15 +29,19 @@ extern "C" void app_main(void)
     }
     load_preferences();
     load_station_catalog();
-    gpio_hold_dis(BSP_LCD_BACKLIGHT);
+    board_init();
     initialize_audio();
     initialize_button_audio();
     build_ui();
     const bool network_ready = ensure_network_stack();
     if (!network_ready) {
+#if P4RADIO_WIFI_HOSTED
         // Ethernet remains a possible fallback on the 86-panel assembly, but this build
         // intentionally reports the missing C6 link rather than pretending that P4 has Wi-Fi.
-        set_status("No C6 Wi-Fi: check the coprocessor firmware or use Ethernet");
+        set_status("C6 Wi-Fi unavailable: check reset/power and firmware");
+#else
+        set_status("Wi-Fi initialization failed");
+#endif
     }
     xTaskCreate(playback_task, "radio_playback", 8192, nullptr, 5, nullptr);
 }

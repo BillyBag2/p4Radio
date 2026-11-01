@@ -15,7 +15,7 @@ menu "p4Radio"
             bool "Circular (black corners on a square panel)"
             select LV_DRAW_SW_COMPLEX if LV_USE_DRAW_SW
             help
-                Keep all content within a 720-pixel-diameter circle. Volume
+                Keep all content within a display-sized circle. Volume
                 and station buttons fit inside it with centered captions.
                 The area outside the circle is black and ignores touches.
 

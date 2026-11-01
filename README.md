@@ -1,6 +1,10 @@
 # p4Radio
 
-A simple internet radio targeting the Waveshare ESP32-P4-86-Panel-ETH-2RO (SKU 31570).
+An internet radio for Waveshare ESP32-P4-86-Panel-ETH-2RO, M5Stack TAB5 and Waveshare ESP32-S3-Touch-LCD-1.85C V2.
+
+The strategy for supporting additional hardware is documented in
+[ESP-IDF-BOARDS.md](ESP-IDF-BOARDS.md), covering board selection, chip compatibility,
+per-board build directories and SDK configuration, and shared hardware interfaces.
 
 ## Usage
 
@@ -65,27 +69,45 @@ GUI allows changing to a dormant state where the device appears to be off.
 
 ## Hardware specifications
 
-| Component | ESP32-P4-86-Panel-ETH-2RO |
-| --- | --- |
-| Main processor | ESP32-P4NRW32, dual-core 32-bit RISC-V high-performance CPU up to 360 MHz, plus a low-power RISC-V core up to 40 MHz |
-| Chip revision | ESP32-P4 revision 1.3. Target pre-v3 silicon branch. |
-| PSRAM | 32 MB up to 200 MHz |
-| Flash | 32 MB external SPI NOR flash |
-| Display | 4-inch IPS, 720 x 720 pixels, 2-lane MIPI DSI; ST7703 driver; backlight enable GPIO33, PWM GPIO26, reset GPIO27 |
-| Touch | GT911 five-point capacitive touch controller over I2C; SDA GPIO7, SCL GPIO8, reset GPIO23; interrupt is routed to a test point |
-| Wi-Fi and Bluetooth | ESP32-C6-MINI-1U-H8 coprocessor connected over SDIO; Wi-Fi 6 (2.4 GHz) and Bluetooth 5 LE. Wireless support is provided by the C6, not the P4. |
-| Ethernet | IP101 10/100 Mbit/s Ethernet PHY; RJ45 is on the 86 Panel bottom board |
-| Audio | ES8311 audio codec, ES7210 microphone ADC, onboard microphone and 8 ohm / 2 W speaker output |
-| Other board I/O | TF/microSD slot, USB 2.0 High-Speed OTG, USB-to-UART, RS485 and two isolated relay outputs |
-| Power | DC 6-30 V input on the ETH-2RO bottom board; USB-C power/programming on the main board |
+| Component | ESP32-P4-86-Panel-ETH-2RO | M5Stack TAB5 | Waveshare ESP32-S3-Touch-LCD-1.85C V2 |
+| --- | --- | --- | --- |
+| Project configuration | `waveshare86` | `tab5` | `waveshare185c` (`esp32s3`) |
+| Main processor | ESP32-P4NRW32, dual-core 32-bit RISC-V high-performance CPU up to 360 MHz, plus a low-power RISC-V core up to 40 MHz | ESP32-P4NRW32; dual-core RISC-V HP CPU at 360 MHz, LP core up to 40 MHz | ESP32-S3R8; dual-core Xtensa LX7, up to 240 MHz |
+| Chip / board revision | ESP32-P4 revision 1.3. Target pre-v3 silicon branch. | Firmware targets pre-v3 silicon; individual board revision not verified | Board V2 / Rev2.0; S3 silicon revision not verified |
+| PSRAM | 32 MB up to 200 MHz | 32 MB; firmware configured for HEX mode at 200 MHz | 8 MB octal PSRAM, configured at 80 MHz |
+| Flash | 32 MB external SPI NOR flash | 16 MB SPI NOR flash | 16 MB SPI NOR flash |
+| Display | 4-inch IPS, 720 x 720 pixels, 2-lane MIPI DSI; ST7703 driver; backlight enable GPIO33, PWM GPIO26, reset GPIO27 | 5-inch IPS, 1280 x 720 landscape; MIPI DSI; ILI9881C or ST7123/ST7121 depending on hardware revision; backlight GPIO22 | 1.85-inch round, 360 x 360; ST77916 over QSPI; backlight GPIO5 |
+| Touch | GT911 five-point capacitive touch controller over I2C; SDA GPIO7, SCL GPIO8, reset GPIO23; interrupt is routed to a test point | Capacitive; GT911 or integrated ST7123/ST7121; I2C SDA GPIO31, SCL GPIO32, interrupt GPIO23 | CST816 capacitive touch; I2C SDA GPIO11, SCL GPIO10; interrupt GPIO4; reset via TCA9554 |
+| Wi-Fi and Bluetooth | ESP32-C6-MINI-1U-H8 coprocessor connected over SDIO; Wi-Fi 6 (2.4 GHz) and Bluetooth 5 LE. Wireless support is provided by the C6, not the P4. | ESP32-C6-MINI-1U over SDIO; 2.4 GHz Wi-Fi 6 and Bluetooth LE | Native ESP32-S3 2.4 GHz Wi-Fi (802.11 b/g/n) and Bluetooth 5 LE; no coprocessor |
+| Ethernet | IP101 10/100 Mbit/s Ethernet PHY; RJ45 is on the 86 Panel bottom board | No onboard Ethernet | None onboard |
+| Audio | ES8311 audio codec, ES7210 microphone ADC, onboard microphone and 8 ohm / 2 W speaker output | ES8388 codec, ES7210 dual-microphone front end; 8 ohm / 1 W speaker; 3.5 mm headphone jack | V2: ES8311 codec, ES7210 ADC, dual microphones, NS4150B amplifier; BOX speaker rated 4 ohm / 5 W |
+| Storage expansion | TF/microSD slot | microSD slot | TF/microSD slot |
+| USB | USB 2.0 High-Speed OTG and separate USB-to-UART interface | USB-A host and USB-C OTG | USB-C native USB 2.0 Full Speed |
+| RS485 | Interface on the ETH-2RO bottom board | SIT3088; switchable 120-ohm termination | None onboard |
+| Relays | Two isolated relay outputs on the ETH-2RO bottom board | None onboard | None onboard |
+| Camera | No camera fitted; the ETH-2RO main PCB omits the camera connector found on the LCD-4B variant | Onboard 2 MP MIPI-CSI camera; sensor varies by revision | None onboard |
+| Motion sensor | No onboard IMU listed | BMI270 accelerometer/gyroscope | No IMU listed |
+| RTC | Rechargeable RTC battery header; RTC hardware details are not specified in the board overview | RX8130CE RTC with supercapacitor backup | PCF85063; rechargeable RTC battery header |
+| Battery | RTC backup connection; main supply is external DC or USB-C | Removable NP-F550; included with TAB5 Kit, optional for standard TAB5 | 3.7 V lithium-battery connector with charging; battery supply varies by package |
+| Expansion | 2.0 mm expansion headers and ETH-2RO bottom-board connection | HY2.0-4P, M5-Bus, GPIO_EXT and STAMP pads | UART, shared I2C and reserved 28-pin header |
+| Power | DC 6-30 V input on the ETH-2RO bottom board; USB-C power/programming on the main board | USB-C, battery or 6-24 V RS485 power input | USB-C 5 V or 3.7 V battery |
+
+Hardware references: [Waveshare board documentation](https://docs.waveshare.com/ESP32-P4-WIFI6-Touch-LCD-4B),
+[M5Stack TAB5 specifications and pin map](https://docs.m5stack.com/en/core/Tab5),
+and [Waveshare 1.85C hardware revisions](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.85C).
+Firmware selections are recorded in each `sdkconfig.<board>` file. The 1.85C
+configuration targets V2 / Rev2.0; V1 uses different audio hardware.
+TAB5 display/touch variants are described by the vendor; the pinned BSP's support
+and this firmware still require verification on the particular hardware revision.
+Listed peripherals describe the hardware; p4Radio does not currently use every peripheral.
 
 ## Radio controls and setup
 
-At first boot, the radio opens the unsecured `p4Radio-Setup` Wi-Fi network. Join it from a phone; its captive portal scans nearby networks and saves the chosen SSID and password in NVS before connecting. After Wi-Fi comes up, p4Radio fetches the selected BBC HLS playlist, extracts AAC audio from its MPEG-TS segments, and sends decoded audio to the onboard ES8311 codec and speaker output. The five presets are BBC Radio 1, 2, 4, 4 Extra, and 5 Live; Radio 4 Extra fills the repeated BBC 4 entry in the original list. Station and volume selections are retained across restarts.
+At first boot, the radio opens the unsecured `p4Radio-Setup` Wi-Fi network. Join it from a phone; its captive portal scans nearby networks and saves the chosen SSID and password in NVS before connecting. After Wi-Fi comes up, p4Radio fetches the selected BBC HLS playlist, extracts AAC audio from its MPEG-TS segments, and sends decoded audio to the selected board's codec and speaker output. The five presets are BBC Radio 1, 2, 4, 4 Extra, and 5 Live; Radio 4 Extra fills the repeated BBC 4 entry in the original list. Station and volume selections are retained across restarts.
 
-The display has previous/next station, volume down/up, OFF, and TUNE controls. OFF uses an awake idle mode so touch polling and Wi-Fi remain active; tapping the dark screen resumes playback. This consumes more power than deep sleep. The GT911 interrupt is not connected to an MCU GPIO on this board, so deep sleep cannot provide touch wake.
+The display has previous/next station, volume down/up, OFF, and TUNE controls. OFF uses an awake idle mode so touch polling and Wi-Fi remain active; tapping the dark screen resumes playback. This consumes more power than deep sleep. On the Waveshare 86 panel, the GT911 interrupt is not connected to an MCU GPIO, so deep sleep cannot provide touch wake.
 
-Wi-Fi provisioning and playback require a compatible ESP32-C6 ESP-Hosted slave image. The P4 host dependencies are pinned in [`main/idf_component.yml`](main/idf_component.yml). Waveshare's published examples do not include the C6 image, so a board with a missing or incompatible image cannot provide the setup AP until its C6 firmware is installed. The app reports that link failure on screen.
+On the P4 boards, Wi-Fi provisioning and playback require a compatible ESP32-C6 ESP-Hosted slave image. The S3 board uses its native Wi-Fi. The P4 host dependencies are pinned in [`main/idf_component.yml`](main/idf_component.yml). Waveshare's published examples do not include the C6 image, so a board with a missing or incompatible image cannot provide the setup AP until its C6 firmware is installed. The app reports that link failure on screen.
 
 ### Station browser and saved stations
 
@@ -152,12 +174,117 @@ The player supports continuous HTTP MP3/AAC (including AAC+) and unencrypted AAC
 Use ESP-IDF 6.1 (or a compatible ESP-IDF release supported by the pinned components):
 
 ```sh
-idf.py set-target esp32p4
-idf.py build
-idf.py -p PORT flash monitor
+idf.py --preset waveshare86 set-target esp32p4
+idf.py --preset waveshare86 build
+idf.py --preset waveshare86 -p PORT flash monitor
 ```
 
-The first configure/build resolves the pinned components from the ESP Component Registry. The 32 MB custom partition table reserves an 8 MB app slot and the remaining space for storage.
+Application defaults select performance optimization (`-O2`). Debug symbols,
+assertions and diagnostic logging remain available.
+
+Run `set-target` only for a fresh configuration; it regenerates SDK settings.
+In VS Code, select chip `esp32p4` with **ESP-IDF: Set Espressif Device Target**,
+then choose `waveshare86` with **ESP-IDF: Select Project Configuration** and use
+the normal Build, Flash, Monitor and Debug commands. Chip selection remains
+separate from board selection, following the extension's
+[project configuration workflow](https://docs.espressif.com/projects/vscode-esp-idf-extension/en/latest/additionalfeatures/project-configuration.html).
+
+Implemented configurations are `waveshare86` (Waveshare ESP32-P4-86-Panel-ETH-2RO)
+and `tab5` (M5Stack TAB5), both targeting `esp32p4`, plus `waveshare185c`
+(Waveshare ESP32-S3-Touch-LCD-1.85C V2) targeting `esp32s3`. Each keeps its build output
+and generated SDK configuration in `build/<board>/`; previous root-level
+`sdkconfig` and build outputs are left in place and are not migrated automatically.
+Common defaults are in `sdkconfig.defaults`; hardware defaults are in
+`sdkconfig.<board>`. Board/chip compatibility is
+defined in `cmake/boards.cmake`, and display/audio BSP calls are implemented in
+`main/boards/<board>/board.cpp` behind `main/board.h`.
+
+To build TAB5 alongside Waveshare, select **ESP-IDF: Select Project Configuration >
+tab5**, or run `idf.py --preset tab5 build` in the ESP-IDF 6.1 terminal. For a
+fresh setup, use `idf.py --preset tab5 set-target esp32p4` first. Switch back by
+selecting `waveshare86` or building with its preset; do not routinely run
+`set-target` when returning to an existing build. Dependency versions are pinned
+in `dependencies.lock` for Waveshare 86, `dependencies.tab5.lock` for TAB5 and
+`dependencies.waveshare185c.lock` for the S3 board.
+ESP-IDF manages a shared `managed_components/` directory. A shared board marker
+causes cached builds to reconfigure when switching back, restoring their BSP
+dependencies while retaining compiled output and SDK settings. Do not build
+different boards concurrently in the same checkout.
+
+TAB5 uses the [Espressif TAB5 BSP](https://components.espressif.com/components/espressif/m5stack_tab5/versions/1.3.2/readme)
+for its display, touch, ES8388 speaker and Wi-Fi power control. Its defaults use
+16 MB flash, 32 MB HEX PSRAM and pre-v3 ESP32-P4 silicon at 360 MHz. Its separate
+partition table retains the 8 MB app slot and fits storage into 16 MB. The C6
+SDIO connection uses CLK 12, CMD 13, D0-D3 11/10/9/8 and active-high reset 15,
+following the [M5Stack pin map](https://docs.m5stack.com/en/core/Tab5).
+The C6 must have firmware compatible with ESP-Hosted 2.12.11; this project does
+not flash or update that coprocessor automatically.
+
+ESP-Hosted's TAB5 reset setting must be **Active High**: its reset sequence ends
+with GPIO15 (C6 EN) high, releasing the C6. Selecting Active Low leaves it low,
+causing `sdmmc_init_ocr` timeouts (`0x107`). See the
+[TAB5 reset-polarity report](https://github.com/m5stack/M5Tab5-UserDemo/issues/1).
+For an existing build, search for `ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH` in
+`idf.py --preset tab5 menuconfig` and select **RESET: Active High**, then rebuild.
+Defaults do not override an existing `sdkconfig`; the TAB5 build rejects the
+incorrect setting so an old configuration cannot silently retain it.
+
+TAB5 starts in landscape (1280 x 720). Every skin fits the shorter display edge
+and stays centered: Square and Retro stay square, and Circular stays circular
+with inactive black corners. At this resolution the skin is 720 x 720, with
+280-pixel black margins on each side. Geometry and fonts adapt to other display
+sizes, using the closest compiled Montserrat face. Setup QR and wake overlays
+stay inside the skin, and margin taps do not activate controls. Smaller screens
+use the same scaling as the rest of the skin.
+
+For a fresh 1.85C V2 configuration, run:
+
+```sh
+idf.py --preset waveshare185c set-target esp32s3
+idf.py --preset waveshare185c build
+```
+
+In VS Code, select chip `esp32s3` and project configuration `waveshare185c`.
+Its 16 MB flash, 8 MB octal PSRAM and 240 MHz CPU defaults are separate from the
+P4 boards. Wi-Fi runs on the S3 itself; ESP-Hosted is used only by the P4 boards.
+The port follows the [Waveshare V2 examples](https://github.com/waveshareteam/ESP32-S3-Touch-LCD-1.85C)
+for QSPI panel initialization, touch/LCD reset via TCA9554 and ES8311 audio.
+It does not support the V1 PCM5101 audio hardware.
+
+On the round 360 x 360 panel, Circular uses the full diameter. Square and Retro
+are centered 254 x 254 squares inscribed in the circle, keeping their corners
+visible. Fonts follow the skin's pixel ratio to the original 720-pixel layout:
+Circular uses 50% sizes (24 -> 12, 40 -> 20, 48 -> 24 pixels). Inscribed Square
+and Retro use the 254/720 ratio, choosing 8, 14 and 16 pixels respectively.
+Button-symbol enlargement keeps its original multiplier after font selection;
+letter/line spacing scales with the layout. Small-screen text fit and touch
+alignment need on-board evaluation. The shared drawing pool is 768 KB on this
+panel, leaving PSRAM for the unchanged twenty-second PCM buffer; P4 boards
+retain their 3 MB pool. The default skin is Circular when NVS has no saved skin.
+
+The 1.85C allocates TLS contexts and buffers in PSRAM so HTTPS segment downloads
+can continue after the audio decoder starts. In ESP-IDF 6.1, TLS error `-0x008D`
+means insufficient memory. Existing builds must also select **External SPIRAM**
+under **mbedTLS > Memory allocation strategy** in menuconfig; changing defaults
+does not replace the previous internal-only allocation setting.
+
+The 1.85C also disables `CONFIG_MBEDTLS_HARDWARE_AES`: the IDF hardware AES
+path can require temporary internal DMA buffers even when TLS records live in
+PSRAM. Keeping two HTTPS clients exposed allocation failures in that path.
+Software AES avoids those transient DMA allocations; encryption and certificate
+verification remain enabled. Existing 1.85C configurations must disable
+**Enable hardware AES acceleration** in menuconfig as well as selecting external
+TLS memory. This board-specific setting leaves the P4 configurations unchanged.
+HLS clients use 2 KB receive and 1 KB transmit staging buffers to reduce SRAM
+pressure. Failed HLS requests log free and largest-block sizes for internal SRAM,
+internal DMA memory and PSRAM before releasing the failed client, so the log
+captures the remaining memory pressure before application cleanup. IDF may already
+have released a failed transport internally; these numbers are not an exact
+measurement of peak allocation.
+
+The first configure/build resolves the pinned components from the ESP Component Registry.
+Each board's partition table reserves an 8 MB app slot and uses the remaining
+flash for storage: 32 MB total on Waveshare 86, 16 MB on TAB5 and the 1.85C V2.
 
 ## ESP-IDF configuration
 
@@ -208,7 +335,7 @@ option, and a factory used by `main/display.cpp`; compile their sources in
 
 ### Board configuration
 
-The project targets `esp32p4`. [`sdkconfig.defaults`](sdkconfig.defaults) selects the pre-v3 P4 silicon branch for this board's revision 1.3. ESP-IDF does not permit one binary to support both pre-v3 and v3-or-later P4 revisions, so this firmware configuration is for the reported rev 1.x board.
+The Waveshare board requires `esp32p4`. [`sdkconfig.waveshare86`](sdkconfig.waveshare86) selects the pre-v3 P4 silicon branch for this board's revision 1.3. ESP-IDF does not permit one binary to support both pre-v3 and v3-or-later P4 revisions, so this firmware configuration is for the reported rev 1.x board.
 
 Board specifications: [Waveshare ESP32-P4-WIFI6-Touch-LCD-4B / ETH-2RO documentation](https://docs.waveshare.com/ESP32-P4-WIFI6-Touch-LCD-4B). The 4B documentation covers the shared main board; the ETH-2RO SKU adds the Ethernet/RS485/relay bottom board and omits the camera connector.
 
@@ -232,9 +359,31 @@ TUNE stops playback, clears all stream URLs in `streams96` and the in-memory can
 
 ### Buffered playback
 
-Downloading/decoding and speaker output run in separate FreeRTOS tasks. A PSRAM PCM buffer holds twenty seconds at the decoded format (about 3.84 MB for 48 kHz stereo, 16-bit). Playback starts at 0.5 seconds; decoding pauses above a ten-second target. After an underrun the output waits for two seconds before resuming. Startup still requires downloading the first complete HLS segment. Playback begins one published segment behind the live edge when possible, allowing immediate prefetch at the cost of extra live latency.
+Downloading/decoding and speaker output run in separate FreeRTOS tasks. A PSRAM PCM buffer holds twenty seconds at the decoded format (about 3.84 MB for 48 kHz stereo, 16-bit). Playback starts when the buffer reaches its ten-second target (half full). Downloading/decoding continues as source data becomes available, including above that target; bounded PCM writes wait only when the full twenty-second capacity is occupied, without overwriting buffered audio. Rate correction aims for half full rather than throttling downloads there. HLS arrives in published segment bursts, so buffer levels fluctuate and can exceed the target. After an underrun the output also waits for ten seconds of buffered audio before resuming. This adds startup/refill delay in exchange for more protection against download gaps. Startup still requires downloading the first complete HLS segment. Playback begins one published segment behind the live edge when possible, allowing immediate prefetch at the cost of extra live latency.
+
+HLS retains separate HTTP clients for playlists and media segments, reusing TLS connections when the server allows it. All known pending segments are consumed before refreshing the playlist. Failed requests discard their connection; failed segment downloads refresh the playlist before retrying. If the previous segment has left the live window, playback logs a continuity warning and resumes at the oldest available segment.
+
+Serial telemetry:
+
+- `HLS HTTP`: request wall time, response bytes, HTTP/error status and number of new connections. Zero new connections indicates transport reuse.
+- `HLS segment`: decoded audio duration, total cycle time, and separate playlist/download/extraction/decoder/PCM-queue timings. Decode timing surrounds decoder calls; queue timing includes waiting for PCM capacity. Sustained processing slower than the audio duration drains the buffer. Playlist-publication waits occur between these cycles.
+- `Audio buffer`: fill, underruns, requested/applied correction, accepted PCM frame counts, output frames per wall-clock second and minimum free output-task stack. Output rate includes refill pauses and DMA queue effects; it is not a physical clock measurement.
+- `GUI` every ten seconds: actual redraw cycles per second, average/maximum render and status-update durations, and percentage of elapsed time spent inside render cycles. Rendering includes scheduling/flush waits and excludes final asynchronous DMA completion, so this percentage is not CPU utilisation. Idle displays can report near-zero FPS. LVGL's configured refresh interval remains 33 ms; status/meter updates remain 500 ms. Unchanged labels are no longer reset.
+
+After flashing, capture several minutes of these logs with each skin, including an underrun if one occurs. Also check direct HTTP playback, station changes, TUNE, and OFF/tap resume; host builds cannot verify server keep-alive behaviour, physical audio clocks, touch responsiveness, or uninterrupted playback.
 
 The right-edge bar shows volume, and the left-edge blue bar shows buffer fill against its twenty-second capacity (halfway is the ten-second target). The buffer bar turns amber below one second. Numeric volume text is omitted. Station buttons use `<` and `>`, and volume buttons use `-` and `+`. Buffer duration and underrun count are logged every five seconds. The output clock stays at the decoded nominal sample rate. A streaming fractional resampler corrects gradual buffer drift with a maximum +/-1000 ppm (+/-0.1%) adjustment; positive correction drains the buffer faster. The controller samples once a second, smooths the level with a ten-second time constant, uses a 9-11 second dead band around the ten-second target, and ramps at no more than 50 ppm per second. Startup and underrun refill reset the controller. Buffer logs include the applied ppm. This is slow drift correction, not a replacement for network buffering, and can slightly change pitch/duration. The IDF clock-tuning API requires a stopped I2S channel, so live hardware retuning is not used. OFF, TUNE, and station changes cancel output and discard buffered audio. Cache qualification counts successful speaker output and restarts after underruns.
+
+Both vertical meters have an opaque dark grey track marking their full range,
+even when almost empty: the buffer track represents twenty seconds (ten seconds
+at its midpoint), and the volume track represents maximum volume 10.
+
+The five-second audio log also includes `PCM frames in/out` and `applied avg` in
+ppm. These count only resampled blocks accepted by the codec: positive correction
+sends fewer output frames than input frames, while negative correction sends
+more. The applied average covers the preceding log interval, so it can differ
+from the current controller setting while that setting changes; frame rounding
+also causes small differences.
 
 ### Hostname and setup display
 

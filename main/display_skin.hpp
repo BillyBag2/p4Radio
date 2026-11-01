@@ -3,6 +3,7 @@
 #include <array>
 #include <string>
 #include "lvgl.h"
+#include "skin_geometry.hpp"
 
 namespace p4radio {
 
@@ -24,10 +25,12 @@ protected:
     virtual bool prepare_resources() { return true; }
     virtual void build_controls() = 0;
     virtual void arrange_widgets() = 0;
+    virtual bool is_circular() const { return false; }
     virtual bool contains_point(const lv_point_t &) const { return true; }
     virtual void refresh_theme() {}
     // A single lifetime PSRAM pool is shared by skins needing larger draw tasks.
     static bool prepare_drawing_pool();
+    int coordinate(int value) const { return skin_coordinate(value, side_); }
     uint32_t buffer_color_ = 0x309cff;
     uint32_t buffer_low_color_ = 0xffa020;
 
@@ -56,6 +59,8 @@ protected:
     lv_obj_t *wake_overlay_ = nullptr;
 
 private:
+    int side_ = 720;
+    void fit_geometry(lv_obj_t *object);
     bool build(lv_obj_t *screen);
     struct ButtonBinding { DisplaySkin *skin; Action action; };
     std::array<ButtonBinding, static_cast<size_t>(Action::Count)> buttons_{};

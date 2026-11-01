@@ -2,16 +2,47 @@
 
 ## Project and hardware
 
+For work on supporting additional hardware, follow the multi-board strategy in
+[ESP-IDF-BOARDS.md](ESP-IDF-BOARDS.md). It defines board selection via `MY_BOARD`,
+chip compatibility checks without overriding `IDF_TARGET`, per-board build and
+SDK configuration isolation, and shared board interfaces. Implemented boards are
+`waveshare86` and `tab5` (both `esp32p4`), and `waveshare185c` (`esp32s3`, V2 / Rev2.0).
+The Waveshare 86-specific
+requirements below describe the current hardware and must be preserved for that board.
+
 This is ESP-IDF C++ firmware for the Waveshare ESP32-P4-86-Panel-ETH-2RO,
 with a 720 x 720 LVGL touchscreen and ES8311 speaker codec. Use ESP-IDF 6.1.
 The target board reports ESP32-P4 revision 1.3: preserve the pre-v3 silicon
 selection, 360 MHz clock, 32 MB flash, and 32 MB HEX PSRAM configuration in
-`sdkconfig.defaults`.
+`sdkconfig.waveshare86` (loaded after common `sdkconfig.defaults`).
 
 Wi-Fi is provided by the ESP32-C6 coprocessor over SDIO using ESP-Hosted and
 ESP-WiFi-Remote. The P4 itself has no Wi-Fi. Do not replace this initialization
 with a standalone-P4 Wi-Fi example. Hardware ECDSA verification is disabled
 because this silicon revision does not support that peripheral.
+
+TAB5 uses the managed `espressif/m5stack_tab5` BSP for the landscape 1280 x 720
+display/touch, ES8388 speaker and C6 power control. Keep its 16 MB flash partition
+table and SDIO pin mapping in `sdkconfig.tab5` separate from Waveshare defaults.
+TAB5 requires `CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y`: ESP-Hosted's reset
+sequence finishes at the active level, which must leave C6 EN/GPIO15 high.
+Do not copy the old vendor demo's active-low setting; it holds C6 in reset with
+current ESP-Hosted. Update existing active SDK configuration as well as defaults.
+Dependency locks are `dependencies.lock` (Waveshare 86), `dependencies.tab5.lock`
+and `dependencies.waveshare185c.lock`.
+The generated `build/active-board` marker triggers reconfiguration when switching
+boards because IDF manages shared downloaded components. Build boards sequentially.
+On rectangular displays, skins fit a centered square whose side is the shorter edge; Circular
+retains circular clipping and hit testing. Scale geometry and choose the closest
+compiled Montserrat font at the same ratio to the original 720-pixel skin. Keep
+symbol enlargement multipliers unchanged so glyphs are not scaled twice.
+
+The 1.85C port targets V2 ES8311/ES7210 hardware, not V1 PCM5101. Keep its native
+Wi-Fi path separate from P4 ESP-Hosted via the central `BOARD_WIFI_HOSTED` feature.
+Its board module owns QSPI LCD, TCA9554 resets, CST816 touch and audio wiring.
+Keep `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y` for the 1.85C: internal-only TLS
+allocation can fail once decoding starts. Preserve the twenty-second PCM buffer.
+Square skins are inscribed in the physically round panel; Circular fills it.
 
 Read the relevant source before changing behavior. README contains historical
 descriptions as well as current instructions; check implementation when they
@@ -21,6 +52,8 @@ disagree, especially around dormant-state wake handling.
 
 | File | Responsibility |
 | --- | --- |
+| `cmake/boards.cmake`, `CMakePresets.json`, `sdkconfig.<board>` | Board compatibility, selection and isolated configuration |
+| `main/board.h`, `main/boards/<board>/board.cpp` | Shared hardware interface and selected display/audio implementation |
 | `main/main.cpp` | Startup, NVS initialization, stream cache migration |
 | `main/radio.hpp`, `main/radio_state.cpp` | Shared interfaces, constants, state, station presets |
 | `main/settings.cpp` | Preferences, hostname validation, shared status helpers |
@@ -33,6 +66,7 @@ disagree, especially around dormant-state wake handling.
 | `main/playback.cpp` | AAC decoding, PCM buffering, audio output task, idle/resume lifecycle |
 | `main/display.cpp` | BSP display startup, selected skin and refresh timer |
 | `main/display_skin.cpp`, `.hpp` | Abstract skin base, shared widgets, controls, QR and wake behavior |
+| `main/skin_geometry.hpp` | Display-independent skin dimensions and circular touch geometry |
 | `main/display_skin_square.cpp`, `display_skin_circular.cpp` | Runtime-selectable compiled layouts; circular clipping and touch boundary |
 | `main/display_skin_retro.cpp` | Square vintage cabinet, cloth drawing, Bakelite controls and preset dial pointer |
 | `main/button_audio.cpp`, `.hpp` | Sound layers, speaker serialization, deferred volume/preferences |
@@ -50,7 +84,8 @@ Keep shared behavior in `DisplaySkin` and layout in derived classes. Switch
 skins only in the LVGL context; retain each widget tree after first use, and
 carry QR dismissal/manual state and the wake overlay across switches. Preserve
 black, inactive corners for the circular skin, including QR and wake overlays.
-Circular and Retro share one lifetime 3 MB PSRAM drawing pool in `DisplaySkin`.
+Circular and Retro share one lifetime PSRAM drawing pool in `DisplaySkin`:
+3 MB on the P4 displays, 768 KB on the 360-pixel S3 display.
 Do not allocate a separate pool each time a skin is activated. Keep
 `CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=3072` in defaults and active config:
 LVGL 9.3 derives its TLSF block limit from the base heap plus this allowance;
@@ -64,11 +99,13 @@ preset needle without changing playback or persistence behavior.
 Run commands from the repository root in an initialized ESP-IDF terminal:
 
 ```sh
-idf.py build
-idf.py -p PORT flash monitor
+idf.py --preset waveshare86 build
+idf.py --preset waveshare86 -p PORT flash monitor
 ```
 
-For a fresh target configuration, use `idf.py set-target esp32p4`. Do not run
+Select chip `esp32p4`, then project configuration `waveshare86` in the ESP-IDF
+extension. For a fresh CLI configuration, use
+`idf.py --preset waveshare86 set-target esp32p4`. Do not run
 this routinely on an existing setup: it regenerates configuration. Use the
 actual device port, not a hardcoded COM number. Close other serial monitors
 before flashing. The board's USB-to-UART and native USB interfaces are distinct.
@@ -79,8 +116,10 @@ and review the lock diff for unrelated updates. IDF 6 uses managed
 `espressif/cjson`, not the removed built-in `json` component.
 
 `sdkconfig` is ignored and machine-local; durable configuration changes belong
-in `sdkconfig.defaults`. Existing configurations may also need their active
-settings updated because defaults do not override them. Do not edit downloaded
+in `sdkconfig.defaults` (common) or `sdkconfig.<board>` (hardware). Build output
+and generated SDK configuration live under `build/<board>/`. Existing
+configurations may also need their active settings updated because defaults do
+not override them. Do not edit downloaded
 `managed_components/` or generated `build/` files to implement project fixes.
 
 If the IDF Python environment/toolchain is missing, report the exact blocker;
@@ -100,8 +139,10 @@ do not claim a successful build or install/replace the user's setup implicitly.
   and continuous HTTP MP3/AAC (including AAC+);
   enabled decoder libraries do not imply support for other stream containers.
 - Decoding/download and speaker output run concurrently. PCM capacity is twenty
-  seconds, startup threshold 0.5 seconds, target ten seconds, and underrun
-  refill two seconds. The I2S clock stays fixed; bounded fractional PCM resampling corrects drift
+  seconds, startup threshold ten seconds (half full), target ten seconds, and
+  underrun refill ten seconds. Read/decode whenever source data is available, applying producer backpressure
+  only at full PCM capacity, not at the half-full resampling target.
+  The I2S clock stays fixed; bounded fractional PCM resampling corrects drift
   within +/-1000 ppm, with a smoothed ten-second target and 9-11 second dead
   band. Preserve the interpolation phase across blocks and reset on refill. Keep PSRAM buffers
   out of task stacks and preserve cancellation/join-before-free ordering.
@@ -202,3 +243,19 @@ mute/delete during playback, stale tab actions, delete/re-add cache isolation,
 TUNE retaining the catalog, and OFF/wake after changing the enabled list.
 
 ICY framing checks: `riscv32-esp-elf-g++ -std=gnu++26 -fsyntax-only -I main tools/check_icy_audio.cpp`. Direct MP3/AAC, AAC+, redirects, ICY metadata and persisted preview type need board verification alongside BBC HLS playback.
+
+Skin geometry checks: `riscv32-esp-elf-g++ -std=gnu++26 -fsyntax-only -I main tools/check_skin_geometry.cpp`.
+These check sizing and circular hit boundaries, not LVGL rendering. On TAB5,
+verify all three centered skins, touch alignment, inactive margins/corners,
+setup/settings QR transitions, skin switching, OFF/tap resume, Wi-Fi and audio.
+On the 1.85C V2 also check native Wi-Fi/AP fallback, panel variant detection,
+scaled text fit, inscribed square skins, ES8311 volume/click feedback and
+uninterrupted playback with all three cached skins in 8 MB PSRAM. Run the skin
+geometry compile check with `xtensa-esp32s3-elf-g++` as well as the P4 compiler.
+
+PCM rate-matcher checks: `riscv32-esp-elf-g++ -std=gnu++26 -fsyntax-only -I main tools/check_buffer_sync.cpp`
+(also run with `xtensa-esp32s3-elf-g++`). They evaluate the actual resampler at
+compile time for frame counts, mono/stereo block continuity, clamping and reset.
+The five-second playback log counts input/output frames only after codec write
+success and reports their applied average correction. This verifies the digital
+path; physical DAC timing and long-run buffer stability still need board checks.
