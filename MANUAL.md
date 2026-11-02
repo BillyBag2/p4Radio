@@ -47,7 +47,7 @@ The p4radio will connect to your WiFi.
 
 ### Square skin (TAB5)
 
-![TAB5 radio display](images\tab5\c1b949d4.jpg)
+![TAB5 radio display](images/tab5/c1b949d4.jpg)
 
 ## Web page settings
 

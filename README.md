@@ -6,7 +6,7 @@ The strategy for supporting additional hardware is documented in
 [ESP-IDF-BOARDS.md](ESP-IDF-BOARDS.md), covering board selection, chip compatibility,
 per-board build directories and SDK configuration, and shared hardware interfaces.
 
-For operation see: [MANUAL.md](MANUAL.md)(
+For operation see: [MANUAL.md](MANUAL.md).
 
 ## Web pages and screenshots
 

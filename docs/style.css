@@ -1,0 +1,3 @@
+/* Keep screenshots and hardware comparison tables usable on narrow screens. */
+.rst-content img { max-width: 100%; height: auto; }
+.rst-content table { display: block; max-width: 100%; overflow-x: auto; }
