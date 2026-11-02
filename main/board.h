@@ -13,6 +13,10 @@ void board_init();
 esp_codec_dev_handle_t board_speaker_init();
 bool board_display_start();
 bool board_display_is_round();
+// Only the screenshot worker mounts/unmounts storage. Never format on failure.
+esp_err_t board_sdcard_mount();
+esp_err_t board_sdcard_unmount();
+const char *board_sdcard_path();
 bool board_display_lock(int32_t timeout_ms);
 void board_display_unlock();
 esp_err_t board_display_brightness_set(int percent);

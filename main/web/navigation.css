@@ -1,0 +1,5 @@
+nav.page-tabs{display:flex;flex-wrap:wrap;gap:6px;margin:18px 0 24px;padding-bottom:8px;border-bottom:1px solid #52647f}
+nav.page-tabs a{display:block;padding:9px 12px;border-radius:8px;text-decoration:none;color:#bfccde;font:600 15px/1.4 system-ui,sans-serif}
+nav.page-tabs a:hover{background:#26374d;color:#f3f6fb}
+nav.page-tabs a[aria-current=page]{background:#60d6ad;color:#10251d}
+nav.page-tabs a:focus-visible{outline:3px solid #f1cf78;outline-offset:3px}

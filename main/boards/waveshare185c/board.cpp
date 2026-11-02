@@ -12,6 +12,8 @@
 #include "esp_lcd_touch_cst816s.h"
 #include "esp_lvgl_port.h"
 #include "esp_log.h"
+#include "esp_vfs_fat.h"
+#include "driver/sdmmc_host.h"
 #include "freertos/task.h"
 
 #ifndef BOARD_WAVESHARE185C
@@ -29,6 +31,7 @@ constexpr int kResolution = 360;
 constexpr int kDrawLines = 30;
 i2c_master_bus_handle_t i2c_bus = nullptr;
 i2c_master_dev_handle_t expander = nullptr;
+sdmmc_card_t *sdcard = nullptr;
 
 void expander_write(uint8_t reg, uint8_t value)
 {
@@ -227,5 +230,29 @@ esp_err_t board_display_brightness_set(int percent)
 }
 esp_err_t board_display_backlight_off() { return board_display_brightness_set(0); }
 bool board_display_is_round() { return true; }
+
+const char *board_sdcard_path() { return "/sdcard"; }
+esp_err_t board_sdcard_mount()
+{
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
+    // Waveshare V2 vendor SD_MMC wiring: one-bit SDMMC, separate from QSPI LCD.
+    slot.width = 1;
+    slot.clk = GPIO_NUM_14;
+    slot.cmd = GPIO_NUM_17;
+    slot.d0 = GPIO_NUM_16;
+    slot.d1 = slot.d2 = slot.d3 = GPIO_NUM_NC;
+    slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
+    esp_vfs_fat_sdmmc_mount_config_t config{};
+    config.format_if_mount_failed = false;
+    config.max_files = 2;
+    return esp_vfs_fat_sdmmc_mount(board_sdcard_path(), &host, &slot, &config, &sdcard);
+}
+esp_err_t board_sdcard_unmount()
+{
+    const esp_err_t result = esp_vfs_fat_sdcard_unmount(board_sdcard_path(), sdcard);
+    sdcard = nullptr;
+    return result;
+}
 
 } // namespace p4radio

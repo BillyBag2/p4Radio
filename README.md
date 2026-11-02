@@ -6,22 +6,30 @@ The strategy for supporting additional hardware is documented in
 [ESP-IDF-BOARDS.md](ESP-IDF-BOARDS.md), covering board selection, chip compatibility,
 per-board build directories and SDK configuration, and shared hardware interfaces.
 
-## Usage
+For operation see: [MANUAL.md](MANUAL.md)(
 
-### First setup, or new wifi location
+## Web pages and screenshots
 
-#### Connect your phone directly to the p4Radio
+Open `http://p4radio.local/` (or your saved hostname) and use the Radio,
+Stations, Wi-Fi and Advanced tabs. On **Advanced**, select **Save screenshot
+to SD card** to capture the radio display as a BMP image. Insert a FAT-formatted
+microSD card first; each capture gets a unique filename under `/screens/` on
+the card. Wait for the saved message before removing the card. The firmware
+unmounts the card after each capture and never formats it on mount failure.
+An OFF display is captured as its current black screen without waking the radio.
 
-If the p4Radio cannot connect to it's configured WiFi it displays a
-QRcode. Scan the with your phone, or follow the instructions, to connect
-directly to p4radio. A new QR code will be displayed.
+Screenshot support requires `CONFIG_LV_USE_SNAPSHOT=y` (included in common
+defaults); enable it in an existing SDK configuration as well. On Waveshare 86,
+leave `CONFIG_BSP_SD_FORMAT_ON_MOUNT_FAIL` disabled; screenshot mounting refuses
+that destructive recovery setting. The capture uses a temporary RGB565 PSRAM
+buffer (about 253 KB on 1.85C, 1013 KB on Waveshare 86, or 1800 KB on TAB5).
 
-#### Go to setup page
-
-Scan the second QR code with your phone, or follow the instructions, to go to
-the p4radio setup page. On the page, Wait for the WiFi scan to complete. Click
-the list of available networks to select one for p4radio to use. Enter the WiFi
-password and continue.
+Hardware verification: capture all three skins and setup QR screens; inspect BMP
+colours, orientation, black corners and TAB5 margins. Check missing, full and
+write-protected cards, repeated captures without overwriting, concurrent browser
+requests, retry after inserting a card, uninterrupted playback and OFF/tap wake.
+Run `node tools/check_advanced_browser.mjs` for mocked browser workflow checks;
+these do not verify LVGL rendering, SD writes or hardware behaviour.
 
 ---
 
@@ -31,6 +39,8 @@ password and continue.
 - [ ] Add a "clear saved stations" in configuration.
 - [ ] Add artwork to the display.
 - [ ] Workflow.
+- [ ] TTS (PicoTTS?) for station names and status.
+- [ ] Speech commands
 - [ ] Documentation.
 - [ ] Pages support.
 - [ ] Secret hand shake to get to AP mode.
