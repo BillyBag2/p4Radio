@@ -10,8 +10,10 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_wifi.h"
+#if P4RADIO_WIFI_HOSTED
 #include "esp_wifi_remote.h"
 #include "esp_hosted.h"
+#endif
 #include "freertos/task.h"
 #include "nvs.h"
 #include "mdns.h"
@@ -437,6 +439,7 @@ void wifi_join_watchdog(void *)
 
 bool ensure_network_stack()
 {
+#if P4RADIO_WIFI_HOSTED
     const int hosted_init = esp_hosted_init();
     const int hosted_link = hosted_init == 0 ? esp_hosted_connect_to_slave() : hosted_init;
     if (hosted_link != 0) {
@@ -444,6 +447,7 @@ bool ensure_network_stack()
         ESP_LOGE(kTag, "ESP-Hosted init/link failed: %d/%d", hosted_init, hosted_link);
         return false;
     }
+#endif
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     g_sta_netif = esp_netif_create_default_wifi_sta();
@@ -452,17 +456,27 @@ bool ensure_network_stack()
     apply_hostname();
     ESP_ERROR_CHECK(mdns_service_add(nullptr, "_http", "_tcp", kHttpPort, nullptr, 0));
     wifi_init_config_t wifi_config = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&wifi_config));
+    const esp_err_t wifi_init_result = esp_wifi_init(&wifi_config);
+    if (wifi_init_result != ESP_OK) {
+        // ESP-Hosted 2.12.11's connect call can report success even when SDIO
+        // setup failed. Catch the actual Wi-Fi failure rather than aborting.
+        ESP_LOGE(kTag, "Wi-Fi initialization failed: %s (%d)",
+                 esp_err_to_name(wifi_init_result), static_cast<int>(wifi_init_result));
+        set_status("Wi-Fi initialization failed; check board/network hardware");
+        return false;
+    }
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, nullptr));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, nullptr));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_wifi_set_mode(g_saved_ssid[0] ? WIFI_MODE_STA : WIFI_MODE_APSTA));
     if (g_saved_ssid[0]) {
         wifi_config_t station{};
-        std::strncpy(reinterpret_cast<char *>(station.sta.ssid), g_saved_ssid, sizeof(station.sta.ssid) - 1);
-        station.sta.ssid[sizeof(station.sta.ssid) - 1] = '\0';
-        std::strncpy(reinterpret_cast<char *>(station.sta.password), g_saved_password, sizeof(station.sta.password) - 1);
-        station.sta.password[sizeof(station.sta.password) - 1] = '\0';
+        // ESP-IDF uses fixed-width fields: shorter values retain zero padding;
+        // maximum-length SSIDs/hex PSKs occupy the entire field without a NUL.
+        std::memcpy(station.sta.ssid, g_saved_ssid,
+                    std::min(std::strlen(g_saved_ssid), sizeof(station.sta.ssid)));
+        std::memcpy(station.sta.password, g_saved_password,
+                    std::min(std::strlen(g_saved_password), sizeof(station.sta.password)));
         station.sta.threshold.authmode = WIFI_AUTH_OPEN;
         ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &station));
     }

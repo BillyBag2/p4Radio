@@ -3,6 +3,7 @@
 #include "button_audio.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
@@ -15,13 +16,17 @@ bool DisplaySkin::prepare_drawing_pool()
 {
 #if LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN
     // Shared by Circular and Retro and retained while their cached widget
-    // trees/draw buffers can reference it. Never add a pool per activation.
+    // trees/draw buffers can reference it. P4 keeps 3 MB; the 360-pixel panel
+    // needs one quarter of that drawing area. Never add a pool per activation.
     static void *pool_memory = nullptr;
     if (pool_memory) return true;
-    constexpr size_t pool_bytes = 3 * 1024 * 1024;
-    static_assert(LV_MEM_SIZE + LV_MEM_POOL_EXPAND_SIZE >= pool_bytes,
+    constexpr size_t maximum_pool_bytes = 3 * 1024 * 1024;
+    static_assert(LV_MEM_SIZE + LV_MEM_POOL_EXPAND_SIZE >= maximum_pool_bytes,
                   "Display skins require CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=3072; "
                   "update the active sdkconfig as well as sdkconfig.defaults");
+    lv_display_t *display = lv_display_get_default();
+    const size_t pool_bytes = skin_drawing_pool_bytes(lv_display_get_horizontal_resolution(display),
+                                                     lv_display_get_vertical_resolution(display));
     pool_memory = heap_caps_malloc(pool_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!pool_memory) {
         ESP_LOGE(kTag, "Cannot allocate skin drawing PSRAM pool");
@@ -64,7 +69,7 @@ void DisplaySkin::wake_on_tap()
     if (!g_sleep_requested.load()) return;
     // The full-screen overlay consumes this tap, so it cannot activate a control.
     if (wake_overlay_) lv_obj_add_flag(wake_overlay_, LV_OBJ_FLAG_HIDDEN);
-    const esp_err_t result = bsp_display_brightness_set(100);
+    const esp_err_t result = board_display_brightness_set(100);
     if (result != ESP_OK) ESP_LOGE(kTag, "Backlight restore failed: %s", esp_err_to_name(result));
     request_button_sound();
     g_resume_requested.store(true);
@@ -104,7 +109,7 @@ void DisplaySkin::radio_button(Action action)
             lv_obj_remove_flag(wake_overlay_, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_foreground(wake_overlay_);
         }
-        if (bsp_display_backlight_off() != ESP_OK) ESP_LOGE(kTag, "Backlight off failed");
+        if (board_display_backlight_off() != ESP_OK) ESP_LOGE(kTag, "Backlight off failed");
         g_playback_requested.store(false);
         g_sleep_requested.store(true);
         break;
@@ -147,11 +152,24 @@ lv_obj_t *DisplaySkin::add_button(const char *caption, int x, int y, int width, 
     return button;
 }
 
+namespace {
+void set_label_if_changed(lv_obj_t *label, const char *text)
+{
+    if (std::strcmp(lv_label_get_text(label), text) != 0) lv_label_set_text(label, text);
+}
+
+void set_background_if_changed(lv_obj_t *object, lv_color_t color, lv_part_t part)
+{
+    if (!lv_color_eq(lv_obj_get_style_bg_color(object, part), color))
+        lv_obj_set_style_bg_color(object, color, part);
+}
+} // namespace
+
 void DisplaySkin::refresh()
 {
     const std::string hostname = hostname_copy();
-    if (hostname_label_) lv_label_set_text(hostname_label_, ("http://" + hostname + ".local/").c_str());
-    if (setup_title_) lv_label_set_text(setup_title_, hostname.c_str());
+    if (hostname_label_) set_label_if_changed(hostname_label_, ("http://" + hostname + ".local/").c_str());
+    if (setup_title_) set_label_if_changed(setup_title_, hostname.c_str());
     const int automatic_stage = g_portal_active.load() && !g_setup_submitted.load() ?
         (g_ap_clients.load() > 0 ? 2 : 1) : 0;
     const bool automatic_changed = automatic_stage != previous_automatic_stage_;
@@ -168,17 +186,17 @@ void DisplaySkin::refresh()
                     displayed_qr_ = payload;
                 else ESP_LOGE(kTag, "Setup QR code generation failed");
             }
-            lv_obj_set_style_bg_color(setup_screen_, lv_color_hex(wifi_join_qr ? 0x480f18 : 0x4a3008), 0);
-            if (wifi_join_qr) lv_label_set_text(setup_url_, "Scan to join p4Radio-Setup\n\nTap anywhere to return");
-            else if (manual_settings_qr_) lv_label_set_text(setup_url_, (url + "\n\nTap anywhere to return").c_str());
-            else lv_label_set_text(setup_url_, ("Scan to open " + url + "\nOr http://192.168.4.1/wifi\nTap anywhere to return").c_str());
+            set_background_if_changed(setup_screen_, lv_color_hex(wifi_join_qr ? 0x480f18 : 0x4a3008), LV_PART_MAIN);
+            if (wifi_join_qr) set_label_if_changed(setup_url_, "Scan to join p4Radio-Setup\n\nTap anywhere to return");
+            else if (manual_settings_qr_) set_label_if_changed(setup_url_, (url + "\n\nTap anywhere to return").c_str());
+            else set_label_if_changed(setup_url_, ("Scan to open " + url + "\nOr http://192.168.4.1/wifi\nTap anywhere to return").c_str());
             if (automatic_changed && automatic_stage && !manual_settings_qr_ && !g_sleep_requested.load())
                 request_disconnect_sound();
             lv_obj_remove_flag(setup_screen_, LV_OBJ_FLAG_HIDDEN);
             if (!g_sleep_requested.load()) lv_obj_move_foreground(setup_screen_);
         } else lv_obj_add_flag(setup_screen_, LV_OBJ_FLAG_HIDDEN);
     }
-    if (station_label_) lv_label_set_text(station_label_, selected_station_name().c_str());
+    if (station_label_) set_label_if_changed(station_label_, selected_station_name().c_str());
     if (status_label_) {
         std::string text = status_copy();
         if (text.rfind("Playing ", 0) == 0) {
@@ -188,7 +206,7 @@ void DisplaySkin::refresh()
             text += " - " + (bitrate > 0 ? std::to_string(bitrate) : std::string("--")) + " kbit/s";
             text += channels == 1 ? " - mono" : channels == 2 ? " - stereo" : " - --";
         }
-        lv_label_set_text(status_label_, text.c_str());
+        set_label_if_changed(status_label_, text.c_str());
     }
     if (buffer_bar_) {
         if (g_show_buffer_bar.load()) lv_obj_remove_flag(buffer_bar_, LV_OBJ_FLAG_HIDDEN);
@@ -196,7 +214,7 @@ void DisplaySkin::refresh()
         const int fill = g_buffer_percent.load();
         lv_bar_set_value(buffer_bar_, fill, LV_ANIM_OFF);
         const int low_threshold = 100 / kAudioBufferSeconds; // One second remaining.
-        lv_obj_set_style_bg_color(buffer_bar_, lv_color_hex(fill < low_threshold ? buffer_low_color_ : buffer_color_), LV_PART_INDICATOR);
+        set_background_if_changed(buffer_bar_, lv_color_hex(fill < low_threshold ? buffer_low_color_ : buffer_color_), LV_PART_INDICATOR);
     }
     if (volume_bar_) {
         if (g_show_volume_bar.load()) lv_obj_remove_flag(volume_bar_, LV_OBJ_FLAG_HIDDEN);
@@ -215,8 +233,8 @@ void DisplaySkin::refresh()
         float value = -3.0f;
         if (fresh && stream > 0 && wifi > 0)
             value = std::clamp(std::log2(static_cast<float>(wifi) / stream), -3.0f, 3.0f);
-        const int travel = kMeterWidth - 2 * kMeterMargin - kNeedleWidth;
-        const int x = kMeterMargin + static_cast<int>(std::lround((value + 3.0f) / 6.0f * travel));
+        const int travel = coordinate(kMeterWidth) - 2 * coordinate(kMeterMargin) - coordinate(kNeedleWidth);
+        const int x = coordinate(kMeterMargin) + static_cast<int>(std::lround((value + 3.0f) / 6.0f * travel));
         lv_obj_set_x(bandwidth_needle_, x);
     }
     refresh_theme();
@@ -225,6 +243,10 @@ void DisplaySkin::refresh()
 bool DisplaySkin::build(lv_obj_t *screen)
 {
     if (!prepare_resources()) return false;
+    lv_display_t *display = lv_obj_get_display(screen);
+    side_ = skin_layout_side(lv_display_get_horizontal_resolution(display),
+                             lv_display_get_vertical_resolution(display),
+                             board_display_is_round(), is_circular());
     // The panel outside the skin stays black, including QR and idle screens.
     lv_obj_set_style_bg_color(screen, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
@@ -316,7 +338,8 @@ bool DisplaySkin::build(lv_obj_t *screen)
     if (!g_show_buffer_bar.load()) lv_obj_add_flag(buffer_bar_, LV_OBJ_FLAG_HIDDEN);
     lv_bar_set_range(buffer_bar_, 0, 100);
     lv_bar_set_value(buffer_bar_, 0, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(buffer_bar_, lv_color_hex(0x1b2638), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(buffer_bar_, lv_color_hex(0x404040), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(buffer_bar_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_bg_color(buffer_bar_, lv_color_hex(0x309cff), LV_PART_INDICATOR);
 
     volume_bar_ = lv_bar_create(surface_);
@@ -325,7 +348,8 @@ bool DisplaySkin::build(lv_obj_t *screen)
     if (!g_show_volume_bar.load()) lv_obj_add_flag(volume_bar_, LV_OBJ_FLAG_HIDDEN);
     lv_bar_set_range(volume_bar_, 0, 10);
     lv_bar_set_value(volume_bar_, g_volume.load(), LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(volume_bar_, lv_color_hex(0x1b2638), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(volume_bar_, lv_color_hex(0x404040), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(volume_bar_, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_bg_color(volume_bar_, lv_color_hex(0x60d6ad), LV_PART_INDICATOR);
 
     build_controls();
@@ -391,8 +415,72 @@ bool DisplaySkin::build(lv_obj_t *screen)
     lv_obj_remove_flag(volume_bar_, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(buffer_bar_, LV_OBJ_FLAG_CLICKABLE);
     arrange_widgets();
+    // Fit widget geometry and select fonts at the same ratio, preserving crisp
+    // glyphs and hit testing instead of transforming the whole rendered skin.
+    if (side_ != 720) {
+        for (uint32_t i = 0; i < lv_obj_get_child_count(surface_); ++i)
+            fit_geometry(lv_obj_get_child(surface_, i));
+        lv_qrcode_set_size(setup_qr_, coordinate(320));
+        if (lv_qrcode_update(setup_qr_, wifi_qr, sizeof(wifi_qr) - 1) != LV_RESULT_OK)
+            ESP_LOGE(kTag, "Resized Wi-Fi QR code generation failed");
+    }
+    lv_obj_set_size(surface_, side_, side_);
+    lv_obj_center(surface_);
     lv_obj_update_layout(surface_);
     return true;
+}
+
+void DisplaySkin::fit_geometry(lv_obj_t *object)
+{
+    // Preserve percentage/content dimensions and alignment anchors. Only local
+    // pixel geometry from the skin is changed. Symbol transforms retain their
+    // design multiplier: the selected font already supplies the size reduction.
+    constexpr lv_style_prop_t properties[] = {
+        LV_STYLE_X, LV_STYLE_Y, LV_STYLE_WIDTH, LV_STYLE_HEIGHT,
+        LV_STYLE_PAD_TOP, LV_STYLE_PAD_BOTTOM, LV_STYLE_PAD_LEFT, LV_STYLE_PAD_RIGHT,
+        LV_STYLE_RADIUS, LV_STYLE_BORDER_WIDTH, LV_STYLE_SHADOW_WIDTH,
+        LV_STYLE_SHADOW_OFFSET_X, LV_STYLE_SHADOW_OFFSET_Y,
+        LV_STYLE_TEXT_LETTER_SPACE, LV_STYLE_TEXT_LINE_SPACE
+    };
+    for (lv_style_selector_t selector : {static_cast<lv_style_selector_t>(LV_PART_MAIN),
+                                       static_cast<lv_style_selector_t>(LV_PART_MAIN) |
+                                           static_cast<lv_style_selector_t>(LV_STATE_PRESSED)}) {
+        for (lv_style_prop_t property : properties) {
+            lv_style_value_t value;
+            if (lv_obj_get_local_style_prop(object, property, &value, selector) != LV_STYLE_RES_FOUND ||
+                !LV_COORD_IS_PX(value.num) ||
+                (property == LV_STYLE_RADIUS && value.num == LV_RADIUS_CIRCLE)) continue;
+            const int original = value.num;
+            value.num = coordinate(original);
+            if (original > 0 && value.num == 0) value.num = 1;
+            lv_obj_set_local_style_prop(object, property, value, selector);
+        }
+        lv_style_value_t font_value;
+        if (lv_obj_get_local_style_prop(object, LV_STYLE_TEXT_FONT, &font_value, selector) == LV_STYLE_RES_FOUND) {
+            int design_pixels = 0;
+            if (font_value.ptr == &lv_font_montserrat_24) design_pixels = 24;
+            else if (font_value.ptr == &lv_font_montserrat_40) design_pixels = 40;
+            else if (font_value.ptr == &lv_font_montserrat_48) design_pixels = 48;
+            if (design_pixels) {
+                static constexpr const lv_font_t *fonts[] = {
+                    &lv_font_montserrat_8, &lv_font_montserrat_12,
+                    &lv_font_montserrat_14, &lv_font_montserrat_16,
+                    &lv_font_montserrat_20, &lv_font_montserrat_24,
+                    &lv_font_montserrat_40, &lv_font_montserrat_48
+                };
+                static_assert(sizeof(fonts) / sizeof(fonts[0]) == sizeof(kSkinFontSizes) / sizeof(kSkinFontSizes[0]));
+                const int pixels = skin_font_size(design_pixels, side_);
+                for (size_t i = 0; i < sizeof(fonts) / sizeof(fonts[0]); ++i) {
+                    if (kSkinFontSizes[i] == pixels) {
+                        lv_obj_set_style_text_font(object, fonts[i], selector);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    for (uint32_t i = 0; i < lv_obj_get_child_count(object); ++i)
+        fit_geometry(lv_obj_get_child(object, i));
 }
 
 bool DisplaySkin::activate(lv_obj_t *screen, const DisplaySkin *previous)

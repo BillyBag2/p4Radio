@@ -1,6 +1,7 @@
 #include "radio.hpp"
 #include "button_audio.hpp"
 #include "buffer_sync.hpp"
+#include "hls_http.hpp"
 #include "stream_input.hpp"
 #include "station_rules.hpp"
 #include <algorithm>
@@ -8,7 +9,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <utility>
-#include "driver/gpio.h"
 #include "esp_audio_dec_default.h"
 #include "esp_aac_dec.h"
 #include "esp_audio_simple_dec.h"
@@ -29,7 +29,7 @@ std::atomic<int> g_buffer_percent{0};
 bool open_speaker(const esp_audio_simple_dec_info_t &info)
 {
     if (!g_speaker) {
-        g_speaker = bsp_audio_codec_speaker_init();
+        g_speaker = board_speaker_init();
         if (!g_speaker) return false;
     }
     esp_codec_dev_sample_info_t sample{};
@@ -41,7 +41,7 @@ bool open_speaker(const esp_audio_simple_dec_info_t &info)
     esp_codec_dev_close(g_speaker);
     if (esp_codec_dev_open(g_speaker, &sample) != ESP_CODEC_DEV_OK) {
         unlock_speaker();
-        ESP_LOGE(kTag, "ES8311 open failed for %lu Hz", static_cast<unsigned long>(info.sample_rate));
+        ESP_LOGE(kTag, "Speaker codec open failed for %lu Hz", static_cast<unsigned long>(info.sample_rate));
         return false;
     }
     esp_codec_dev_set_out_vol(g_speaker, g_volume.load() * 10);
@@ -93,17 +93,35 @@ void audio_output_task(void *argument)
     TickType_t last_control = xTaskGetTickCount();
     const size_t pcm_channels = buffer.frame_bytes / sizeof(int16_t);
     bool priming = true;
-    size_t threshold = buffer.bytes_per_second / 2; // Fast start: 0.5 seconds.
+    // Start and resume at the ten-second target: half the PCM capacity.
+    const size_t threshold = buffer.bytes_per_second * kAudioBufferTargetSeconds;
     TickType_t last_log = xTaskGetTickCount();
+    int64_t last_log_us = esp_timer_get_time();
+    // Count only blocks accepted by the codec. Eight bytes of counters on the
+    // existing output-task stack; PCM/resampling storage is unchanged.
+    uint32_t input_frames_logged = 0;
+    uint32_t output_frames_logged = 0;
     while (!audio_cancelled(buffer)) {
         const size_t available = xStreamBufferBytesAvailable(buffer.stream);
         g_buffer_percent.store(static_cast<int>(available * 100 / (buffer.bytes_per_second * kAudioBufferSeconds)));
         if (xTaskGetTickCount() - last_log >= pdMS_TO_TICKS(5000)) {
-            ESP_LOGI(kTag, "Audio buffer: %u ms / %u ms, underruns: %lu, rate correction: %+d ppm",
+            const int64_t now_us = esp_timer_get_time();
+            const int64_t elapsed_us = now_us - last_log_us;
+            const int applied_ppm = output_frames_logged ? static_cast<int>(
+                (static_cast<int64_t>(input_frames_logged) - output_frames_logged) * 1000000 / output_frames_logged) : 0;
+            ESP_LOGI(kTag, "Audio buffer: %u ms / %u ms, underruns: %lu, rate correction: %+d ppm; "
+                     "PCM frames in/out: %lu/%lu, applied avg: %+d ppm; output %.1f frames/s, stack free min %u B",
                 static_cast<unsigned>(available * 1000 / buffer.bytes_per_second),
                 static_cast<unsigned>(kAudioBufferSeconds * 1000),
-                static_cast<unsigned long>(buffer.underruns.load()), controller.ppm());
+                static_cast<unsigned long>(buffer.underruns.load()), controller.ppm(),
+                static_cast<unsigned long>(input_frames_logged),
+                static_cast<unsigned long>(output_frames_logged), applied_ppm,
+                elapsed_us > 0 ? output_frames_logged * 1000000.0 / elapsed_us : 0.0,
+                static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+            input_frames_logged = 0;
+            output_frames_logged = 0;
             last_log = xTaskGetTickCount();
+            last_log_us = now_us;
         }
         if (priming) {
             if (available < threshold) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
@@ -122,9 +140,9 @@ void audio_output_task(void *argument)
         if (!wanted) {
             ++buffer.underruns;
             buffer.played_ms.store(0);
-            ESP_LOGW(kTag, "Audio underrun; refilling to 2 seconds");
+            ESP_LOGW(kTag, "Audio underrun; refilling to %u seconds",
+                     static_cast<unsigned>(kAudioBufferTargetSeconds));
             set_status("Buffering audio...");
-            threshold = buffer.bytes_per_second * 2;
             priming = true;
             set_stream_loading_sound(true);
             continue;
@@ -143,6 +161,8 @@ void audio_output_task(void *argument)
             buffer.error.store(true);
             break;
         }
+        input_frames_logged += count / buffer.frame_bytes;
+        output_frames_logged += output_frames;
         buffer.played_ms.fetch_add(static_cast<uint32_t>(output_bytes * 1000 / buffer.bytes_per_second));
         buffer.last_output.store(xTaskGetTickCount());
     }
@@ -217,6 +237,10 @@ bool play_stream(const Station &station, int station_index)
     bool cached = cached_stream(station_index) == playlist_url;
     TickType_t last_audio_tick = xTaskGetTickCount();
     std::string last_segment;
+    // Keep playlist and media transports separate: their hosts may differ.
+    HlsHttpSession playlist_http;
+    HlsHttpSession segment_http;
+    std::string queued_playlist;
     std::string media_url = source.url;
     int playlist_depth = 0;
     size_t direct_pending = 0;
@@ -226,12 +250,22 @@ bool play_stream(const Station &station, int station_index)
         if (xTaskGetTickCount() - last_progress > pdMS_TO_TICKS(30000)) { failed = true; break; }
         const int limit = g_max_bitrate_kbps.load();
         size_t aac_size = 0;
+        const int64_t cycle_started = esp_timer_get_time();
+        int64_t playlist_us = 0;
+        int64_t download_us = 0;
+        int64_t extract_us = 0;
+        int64_t decode_us = 0;
+        int64_t queue_us = 0;
         if (!source.hls) {
             const int count = source.read(aac_data + direct_pending, 4096);
             if (count <= 0) { failed = true; break; }
             aac_size = direct_pending + count;
         } else {
-            const std::string playlist = source.playlist.empty() ? fetch_hls_playlist(media_url) : std::exchange(source.playlist, {});
+            const int64_t playlist_started = esp_timer_get_time();
+            if (queued_playlist.empty())
+                queued_playlist = source.playlist.empty() ? fetch_hls_playlist(playlist_http, media_url) : std::exchange(source.playlist, {});
+            playlist_us = esp_timer_get_time() - playlist_started;
+            const std::string &playlist = queued_playlist;
             std::array<std::string, kMaxHlsSegments> segments{};
             const size_t segment_count = parse_hls_segments(playlist, media_url, segments);
             if (playlist.find("#EXT-X-STREAM-INF:") != std::string::npos && segment_count) {
@@ -267,6 +301,7 @@ bool play_stream(const Station &station, int station_index)
                     break;
                 }
                 media_url = best;
+                queued_playlist.clear();
                 continue;
             }
             if (playlist.find("#EXT-X-KEY:") != std::string::npos || playlist.find("#EXT-X-MAP:") != std::string::npos) {
@@ -275,6 +310,7 @@ bool play_stream(const Station &station, int station_index)
                 break;
             }
             if (!segment_count) {
+                queued_playlist.clear();
                 audio.played_ms.store(0);
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 continue;
@@ -285,26 +321,39 @@ bool play_stream(const Station &station, int station_index)
             size_t segment_index = last_segment.empty() && segment_count > 1 ? segment_count - 2 : segment_count - 1;
             bool wait_for_next = false;
             if (!last_segment.empty()) {
+                bool found_previous = false;
                 for (size_t i = 0; i < segment_count; ++i) {
                     if (segments[i] == last_segment) {
+                        found_previous = true;
                         if (i + 1 < segment_count) segment_index = i + 1;
                         else wait_for_next = true;
                         break;
                     }
                 }
+                if (!found_previous) {
+                    // A stalled downloader can fall outside the live window.
+                    // Resume at its oldest entry instead of skipping to newest.
+                    segment_index = 0;
+                    ESP_LOGW(kTag, "HLS continuity lost: previous segment left the playlist; resuming oldest available");
+                }
             }
             if (wait_for_next) {
+                queued_playlist.clear();
                 vTaskDelay(pdMS_TO_TICKS(500));
                 continue;
             }
 
             size_t transport_size = 0;
-            if (!download_hls_segment(segments[segment_index], transport_stream, kHlsSegmentMaxSize, transport_size)) {
+            const int64_t download_started = esp_timer_get_time();
+            if (!download_hls_segment(segment_http, segments[segment_index], transport_stream, kHlsSegmentMaxSize, transport_size)) {
+                queued_playlist.clear();
                 audio.played_ms.store(0);
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 continue;
             }
+            download_us = esp_timer_get_time() - download_started;
             last_segment = segments[segment_index];
+            const int64_t extract_started = esp_timer_get_time();
             if (!extract_aac_from_mpeg_ts(transport_stream, transport_size, aac_data, kHlsSegmentMaxSize, aac_size)) {
                 ESP_LOGE(kTag, "Could not extract AAC from HLS segment (%u bytes)", static_cast<unsigned>(transport_size));
                 ESP_LOGE(kTag, "Segment prefix: %02x %02x %02x %02x", transport_size > 0 ? transport_stream[0] : 0,
@@ -314,6 +363,7 @@ bool play_stream(const Station &station, int station_index)
                 failed = true;
                 break;
             }
+            extract_us = esp_timer_get_time() - extract_started;
 
         } // HLS or continuous input shares the decoder and PCM output path.
         esp_audio_simple_dec_raw_t raw{};
@@ -324,7 +374,9 @@ bool play_stream(const Station &station, int station_index)
             esp_audio_simple_dec_out_t decoded{};
             decoded.buffer = output;
             decoded.len = output_size;
+            const int64_t decode_started = esp_timer_get_time();
             const esp_audio_err_t decode_result = esp_audio_simple_dec_process(decoder, &raw, &decoded);
+            decode_us += esp_timer_get_time() - decode_started;
             if (decode_result == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
                 set_status("Audio frame exceeds decoder buffer");
                 failed = true;
@@ -368,20 +420,25 @@ bool play_stream(const Station &station, int station_index)
                     output_task_started = true;
                     audio_open = true;
                     first_audio = false;
-                    ESP_LOGI(kTag, "Playing %s as %s %s", station.name.c_str(), source.mp3 ? "MP3" : "AAC", source.hls ? "HLS" : "HTTP");
-                    set_status("Priming audio buffer...");
+                    ESP_LOGI(kTag, "Playing %s as %s %s: %lu Hz, %u channels, %u-bit PCM", station.name.c_str(),
+                             source.mp3 ? "MP3" : "AAC", source.hls ? "HLS" : "HTTP",
+                             static_cast<unsigned long>(info.sample_rate), static_cast<unsigned>(info.channel),
+                             static_cast<unsigned>(info.bits_per_sample));
+                    set_status("Filling audio buffer to half capacity...");
                 }
                 if (audio_open) {
                     size_t sent = 0;
+                    const int64_t queue_started = esp_timer_get_time();
+                    // Keep reading/decoding at the source's arrival rate. Only
+                    // the bounded PCM queue applies backpressure when full;
+                    // the ten-second level is a resampling target, not a cap.
                     while (sent < decoded.decoded_size && !audio_cancelled(audio) && !audio.error.load()) {
                         sent += xStreamBufferSend(audio.stream, decoded.buffer + sent,
                             decoded.decoded_size - sent, pdMS_TO_TICKS(20));
                     }
+                    queue_us += esp_timer_get_time() - queue_started;
                     if (audio.error.load()) { failed = true; break; }
                     if (audio_cancelled(audio)) break;
-                    // Pace decoding around the configured watermark, leaving room for bursts.
-                    while (xStreamBufferBytesAvailable(audio.stream) > audio.bytes_per_second * kAudioBufferTargetSeconds &&
-                           !audio_cancelled(audio) && !audio.error.load()) vTaskDelay(pdMS_TO_TICKS(20));
                     last_audio_tick = xTaskGetTickCount();
                     esp_audio_simple_dec_info_t info{};
                     if (esp_audio_simple_dec_get_info(decoder, &info) == ESP_AUDIO_ERR_OK &&
@@ -410,7 +467,17 @@ bool play_stream(const Station &station, int station_index)
             if (esp_audio_simple_dec_get_info(decoder, &info) == ESP_AUDIO_ERR_OK && info.bitrate)
                 g_stream_kbps.store(station_rules::decoder_bitrate_kbps(info.bitrate));
         }
-        if (source.hls && !failed && segment_audio_us) g_stream_kbps.store(static_cast<int>(static_cast<uint64_t>(aac_size) * 8000 / segment_audio_us));
+        if (source.hls && !failed && segment_audio_us) {
+            g_stream_kbps.store(static_cast<int>(static_cast<uint64_t>(aac_size) * 8000 / segment_audio_us));
+            ESP_LOGI(kTag, "HLS segment: audio %llu ms, cycle %lld ms; playlist/download/extract/decode/queue "
+                     "%lld/%lld/%lld/%lld/%lld ms; PCM %u ms",
+                     static_cast<unsigned long long>(segment_audio_us / 1000),
+                     static_cast<long long>((esp_timer_get_time() - cycle_started) / 1000),
+                     static_cast<long long>(playlist_us / 1000), static_cast<long long>(download_us / 1000),
+                     static_cast<long long>(extract_us / 1000), static_cast<long long>(decode_us / 1000),
+                     static_cast<long long>(queue_us / 1000),
+                     static_cast<unsigned>(xStreamBufferBytesAvailable(audio.stream) * 1000 / audio.bytes_per_second));
+        }
         if (failed) break;
         if (!first_audio && !audio_open) {
             set_status("Audio output could not start");
@@ -513,7 +580,7 @@ void playback_task(void *)
 
 void initialize_audio()
 {
-    g_speaker = bsp_audio_codec_speaker_init();
+    g_speaker = board_speaker_init();
     if (!g_speaker) {
         set_status("Audio codec initialization failed");
     }

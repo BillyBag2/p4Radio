@@ -20,7 +20,7 @@ private:
         add_button("TUNE", 384, 620, 284, 76, Action::Tune);
     }
 
-    // Shared widget positions preserve the original 720 x 720 layout.
+    // The base class fits the 720 x 720 design to a centered square.
     void arrange_widgets() override {}
 };
 

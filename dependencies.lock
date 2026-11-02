@@ -64,7 +64,7 @@ dependencies:
       require: private
       version: '>=4.0'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 1.5.4
   espressif/esp_hosted:
@@ -354,7 +354,7 @@ dependencies:
     component_hash: b702d642e03e95928046d5c6726558e6444e112420c77efa5fdb6650b0a13c5d
     dependencies: []
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 9.3.0
   waveshare/esp32_p4_wifi6_touch_lcd_4b:
@@ -414,11 +414,13 @@ dependencies:
 direct_dependencies:
 - espressif/cjson
 - espressif/esp_audio_codec
+- espressif/esp_codec_dev
 - espressif/esp_hosted
 - espressif/esp_wifi_remote
 - espressif/mdns
 - idf
+- lvgl/lvgl
 - waveshare/esp32_p4_wifi6_touch_lcd_4b
-manifest_hash: 50660fe44809fc38bb384aeadd65b79b19c55d4fa425cf547544858359ca5189
+manifest_hash: e626393a47649da0d7d129fb7baca92fe61fdc2fcc4ba386767feb30cf298254
 target: esp32p4
 version: 3.0.0

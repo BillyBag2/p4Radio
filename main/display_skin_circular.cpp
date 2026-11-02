@@ -8,6 +8,7 @@ public:
     const char *name() const override { return "Circular"; }
 
 private:
+    bool is_circular() const override { return true; }
     bool prepare_resources() override { return prepare_drawing_pool(); }
 
     void build_controls() override
@@ -65,10 +66,8 @@ private:
     {
         lv_area_t bounds;
         lv_obj_get_coords(surface_, &bounds);
-        // Doubled coordinates keep the half-pixel center exact (359.5).
-        const int dx = 2 * point.x - bounds.x1 - bounds.x2;
-        const int dy = 2 * point.y - bounds.y1 - bounds.y2;
-        return dx * dx + dy * dy <= 720 * 720;
+        return skin_circle_contains(point.x, point.y, bounds.x1, bounds.y1,
+                                    lv_area_get_width(&bounds));
     }
 };
 

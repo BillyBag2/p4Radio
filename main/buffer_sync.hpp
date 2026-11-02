@@ -27,8 +27,8 @@ private:
 // input_frames * 1.002 + 2 output frames for the bounded +/-1000 ppm range.
 class PcmRateMatcher {
 public:
-    void reset() { phase_ = 0; initialized_ = false; }
-    size_t process(const int16_t *input, size_t frames, size_t channels,
+    constexpr void reset() { phase_ = 0; initialized_ = false; }
+    constexpr size_t process(const int16_t *input, size_t frames, size_t channels,
                    int ppm, int16_t *output) {
         if (!frames || !channels || channels > 2) return 0;
         if (!initialized_) {

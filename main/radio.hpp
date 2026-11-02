@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include "bsp/esp32_p4_wifi6_touch_lcd_4b.h"
+#include "board.h"
 #include "esp_http_client.h"
 #include "esp_http_server.h"
 #include "esp_netif.h"
@@ -116,11 +116,12 @@ bool wifi_join_in_progress();
 std::string cached_stream(int index);
 void cache_stream(int index, const std::string &url, uint32_t station_id);
 std::string resolve_station_url(const Station &station, int index);
-std::string fetch_hls_playlist(const std::string &url);
+class HlsHttpSession;
+std::string fetch_hls_playlist(HlsHttpSession &session, const std::string &url);
 std::string make_hls_segment_url(const std::string &playlist_url, const std::string &segment);
 size_t parse_hls_segments(const std::string &playlist, const std::string &playlist_url,
                           std::array<std::string, kMaxHlsSegments> &segments);
-bool download_hls_segment(const std::string &url, uint8_t *buffer, size_t capacity, size_t &size);
+bool download_hls_segment(HlsHttpSession &session, const std::string &url, uint8_t *buffer, size_t capacity, size_t &size);
 bool extract_aac_from_mpeg_ts(const uint8_t *transport_stream, size_t transport_size,
                               uint8_t *aac_data, size_t aac_capacity, size_t &aac_size);
 bool test_internet_connection();

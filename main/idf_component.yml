@@ -2,7 +2,36 @@ dependencies:
   idf: ">=5.5"
   espressif/mdns: "^1.14.0"
   espressif/cjson: "^1.7.19"
-  waveshare/esp32_p4_wifi6_touch_lcd_4b: "3.0.1"
-  espressif/esp_wifi_remote: "1.6.3"
-  espressif/esp_hosted: "2.12.11"
+  waveshare/esp32_p4_wifi6_touch_lcd_4b:
+    version: "3.0.1"
+    rules:
+      - if: "$MY_BOARD == waveshare86"
+  espressif/m5stack_tab5:
+    version: "1.3.2"
+    rules:
+      - if: "$MY_BOARD == tab5"
+  espressif/esp_wifi_remote:
+    version: "1.6.3"
+    rules:
+      - if: "target == esp32p4"
+  espressif/esp_hosted:
+    version: "2.12.11"
+    rules:
+      - if: "target == esp32p4"
+  espressif/esp_lvgl_port:
+    version: "2.9.0"
+    rules:
+      - if: "$MY_BOARD == waveshare185c"
+  espressif/esp_lcd_st77916:
+    version: "2.0.2"
+    rules:
+      - if: "$MY_BOARD == waveshare185c"
+  espressif/esp_lcd_touch_cst816s:
+    version: "1.1.2"
+    rules:
+      - if: "$MY_BOARD == waveshare185c"
+  espressif/esp_codec_dev:
+    version: "1.5.4"
+  lvgl/lvgl:
+    version: "9.3.0"
   espressif/esp_audio_codec: "2.4.0"

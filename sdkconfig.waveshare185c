@@ -1,0 +1,20 @@
+# Waveshare ESP32-S3-Touch-LCD-1.85C: ESP32-S3R8, 16 MB flash, 8 MB OPI PSRAM.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+# Keep TLS buffers/contexts out of the limited SRAM needed by Wi-Fi, DMA and
+# audio tasks. The twenty-second PCM buffer and TLS can coexist in PSRAM.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+# Hardware AES stages PSRAM records through temporary internal DMA buffers.
+# Use software AES on this SRAM-constrained 240 MHz board so two persistent
+# HTTPS connections do not fail when those DMA allocations cannot be satisfied.
+CONFIG_MBEDTLS_HARDWARE_AES=n
+CONFIG_ESP_WIFI_REMOTE_ENABLED=n
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.waveshare185c.csv"
+CONFIG_P4RADIO_SKIN_CIRCULAR=y
+# This port targets V2 / Rev2.0 ES8311 audio hardware.
+CONFIG_CODEC_ES8311_SUPPORT=y
+CONFIG_CODEC_I2C_BACKWARD_COMPATIBLE=n
