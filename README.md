@@ -27,21 +27,27 @@ password and continue.
 
 ## TODO
 
-- [ ] Set hostname.
-- [ ] Beep when waking from dormant.
-- [ ] Different colour to QR codes.
-- [ ] Sounds for QR codes.
+- [ ] Add a "factory reset" in configuration.
+- [ ] Add a "clear saved stations" in configuration.
+- [ ] Add artwork to the display.
+- [ ] Workflow.
+- [ ] Documentation.
+- [ ] Pages support.
 - [ ] Secret hand shake to get to AP mode.
+- [ ] Show directory-server details in settings.
+- [ ] Off timers. (Bed, Meals)
+- [ ] RTC support.
+- [ ] NTP support.
+- [ ] Set time zone ?
+- [x] Set hostname.
+- [x] Beep when waking from dormant.
+- [x] Different colour to QR codes.
+- [x] Sounds for QR codes.
 - [x] Statically compiled display skins.
 - [x] Circular layout and simulation on the square display.
 - [x] Live station browser, filters and browser previews.
 - [x] Add, save and remove custom stations.
-- [ ] Show directory-server details in settings.
 - [x] Mute and re-enable saved stations.
-- [ ] Off timers. (Bed Meals)
-- [ ] RTC support.
-- [ ] NTP support.
-- [ ] Set time zone ?]
 
 
 ---
