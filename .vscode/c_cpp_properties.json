@@ -3,7 +3,7 @@
     {
       "name": "ESP-IDF",
       "compilerPath": "",
-      "compileCommands": "c:\\repos\\p4Radio\\build\\waveshare86\\compile_commands.json",
+      "compileCommands": "c:\\repos\\p4Radio\\build\\tab5\\compile_commands.json",
       "intelliSenseMode": "gcc-x86",
       "includePath": [
         "${workspaceFolder}/**"

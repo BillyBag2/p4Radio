@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Advanced - p4Radio</title>
+  <link rel="stylesheet" href="/stations.css">
+  <link rel="stylesheet" href="/navigation.css">
+  <script src="/advanced.js" defer></script>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">p4Radio</p>
+    <h1>Advanced</h1>
+    <nav class="page-tabs" aria-label="Settings pages">
+      <a href="/">Radio</a><a href="/stations">Stations</a><a href="/wifi">Wi-Fi</a><a href="/advanced" aria-current="page">Advanced</a>
+    </nav>
+  </header>
+  <section aria-labelledby="screenshot-heading">
+    <h2 id="screenshot-heading">Screenshot</h2>
+    <p>Save the radio's current display as a BMP image on its SD card.</p>
+    <p class="hint">Insert a FAT-formatted card before capturing. Images are saved in the screens folder with unique filenames. Keep the card inserted until saving finishes.</p>
+    <button id="capture" type="button" disabled>Save screenshot to SD card</button>
+    <p id="capture-status" role="status" aria-live="polite">Checking screenshot status...</p>
+    <button id="retry-status" type="button" class="secondary" hidden>Check status again</button>
+  </section>
+</main>
+</body>
+</html>

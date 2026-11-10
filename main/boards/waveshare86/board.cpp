@@ -21,6 +21,17 @@ void board_init()
 
 esp_codec_dev_handle_t board_speaker_init() { return bsp_audio_codec_speaker_init(); }
 bool board_display_start() { return bsp_display_start() != nullptr; }
+esp_err_t board_sdcard_mount()
+{
+#if CONFIG_BSP_SD_FORMAT_ON_MOUNT_FAIL
+    // Refuse the BSP's destructive recovery option, including in old sdkconfigs.
+    return ESP_ERR_INVALID_STATE;
+#else
+    return bsp_sdcard_mount();
+#endif
+}
+esp_err_t board_sdcard_unmount() { return bsp_sdcard_unmount(); }
+const char *board_sdcard_path() { return BSP_SD_MOUNT_POINT; }
 bool board_display_is_round() { return false; }
 bool board_display_lock(int32_t timeout_ms) { return bsp_display_lock(timeout_ms); }
 void board_display_unlock() { bsp_display_unlock(); }
