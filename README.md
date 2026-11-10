@@ -49,6 +49,11 @@ these do not verify LVGL rendering, SD writes or hardware behaviour.
 - [ ] RTC support.
 - [ ] NTP support.
 - [ ] Set time zone ?
+- [ ] USB HID keyboard support.
+- [ ] TAB keyboard support.
+- [ ] IR remote support.
+- [ ] Multi pole switch / resistor ladder for volume and station selection.
+- [ ] Battery meter and low-battery warning.
 - [x] Set hostname.
 - [x] Beep when waking from dormant.
 - [x] Different colour to QR codes.
@@ -62,28 +67,11 @@ these do not verify LVGL rendering, SD writes or hardware behaviour.
 
 ---
 
-## Requirements
+## Features
 
-When unable to connect to the wifi network after a period of trying, enable AP
-mode and display a QR code advertising the AP SSID.
+- Remembers last settings across reboots: station, volume, skin, Wi-Fi and hostname.
 
-When a client joins the AP network display an QR code to take them to the setup
-page.
-
-Allow entry of wifi details.
-
-When connected to a network, the device will be configures in the same way as it was when previously used. It will attempt to provide the current station.
-
-The list of available stations will be BBC1 BBC2 BBC4 BBC4 BBC5.
-
-Display the station name.
-
-GUI allows navigation to the different stations.
-GUI allows changing the volume.
-
-GUI allows changing to a dormant state where the device appears to be off.
-
-## Hardware specifications
+## Hardware reference
 
 | Component | ESP32-P4-86-Panel-ETH-2RO | M5Stack TAB5 | Waveshare ESP32-S3-Touch-LCD-1.85C V2 |
 | --- | --- | --- | --- |
@@ -115,7 +103,8 @@ Firmware selections are recorded in each `sdkconfig.<board>` file. The 1.85C
 configuration targets V2 / Rev2.0; V1 uses different audio hardware.
 TAB5 display/touch variants are described by the vendor; the pinned BSP's support
 and this firmware still require verification on the particular hardware revision.
-Listed peripherals describe the hardware; p4Radio does not currently use every peripheral.
+Listed peripherals describe the hardware; p4Radio does not currently use every
+peripheral.
 
 ## Radio controls and setup
 
