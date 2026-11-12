@@ -21,18 +21,19 @@
     }
   },
   "idf.openOcdConfigs": [
-    "board/esp32p4-builtin.cfg"
+    "board/esp32s3-builtin.cfg"
   ],
-  "idf.port": "COM18",
+  "idf.port": "COM19",
   "idf.currentSetup": "C:\\esp\\v6.1\\esp-idf",
   "idf.customExtraVars": {
-    "IDF_TARGET": "esp32p4"
+    "IDF_TARGET": "esp32s3",
+    "MY_BOARD": "esp32_4848s040"
   },
   "clangd.path": "C:\\Espressif\\tools\\esp-clangd\\esp-21.1.3_20260408\\esp-clangd\\bin\\clangd.exe",
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=c:\\repos\\p4Radio\\build\\tab5"
+    "--compile-commands-dir=c:\\repos\\p4Radio\\build\\esp32_4848s040"
   ],
   "idf.flashType": "UART",
   "cSpell.words": [

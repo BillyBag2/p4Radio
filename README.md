@@ -1,6 +1,7 @@
 # p4Radio
 
-An internet radio for Waveshare ESP32-P4-86-Panel-ETH-2RO, M5Stack TAB5 and Waveshare ESP32-S3-Touch-LCD-1.85C V2.
+An internet radio for Waveshare ESP32-P4-86-Panel-ETH-2RO, M5Stack TAB5,
+Waveshare ESP32-S3-Touch-LCD-1.85C V2 and GUITION ESP32-4848S040 (speaker variant).
 
 The strategy for supporting additional hardware is documented in
 [ESP-IDF-BOARDS.md](ESP-IDF-BOARDS.md), covering board selection, chip compatibility,
@@ -73,28 +74,28 @@ these do not verify LVGL rendering, SD writes or hardware behaviour.
 
 ## Hardware reference
 
-| Component | ESP32-P4-86-Panel-ETH-2RO | M5Stack TAB5 | Waveshare ESP32-S3-Touch-LCD-1.85C V2 |
-| --- | --- | --- | --- |
-| Project configuration | `waveshare86` | `tab5` | `waveshare185c` (`esp32s3`) |
-| Main processor | ESP32-P4NRW32, dual-core 32-bit RISC-V high-performance CPU up to 360 MHz, plus a low-power RISC-V core up to 40 MHz | ESP32-P4NRW32; dual-core RISC-V HP CPU at 360 MHz, LP core up to 40 MHz | ESP32-S3R8; dual-core Xtensa LX7, up to 240 MHz |
-| Chip / board revision | ESP32-P4 revision 1.3. Target pre-v3 silicon branch. | Firmware targets pre-v3 silicon; individual board revision not verified | Board V2 / Rev2.0; S3 silicon revision not verified |
-| PSRAM | 32 MB up to 200 MHz | 32 MB; firmware configured for HEX mode at 200 MHz | 8 MB octal PSRAM, configured at 80 MHz |
-| Flash | 32 MB external SPI NOR flash | 16 MB SPI NOR flash | 16 MB SPI NOR flash |
-| Display | 4-inch IPS, 720 x 720 pixels, 2-lane MIPI DSI; ST7703 driver; backlight enable GPIO33, PWM GPIO26, reset GPIO27 | 5-inch IPS, 1280 x 720 landscape; MIPI DSI; ILI9881C or ST7123/ST7121 depending on hardware revision; backlight GPIO22 | 1.85-inch round, 360 x 360; ST77916 over QSPI; backlight GPIO5 |
-| Touch | GT911 five-point capacitive touch controller over I2C; SDA GPIO7, SCL GPIO8, reset GPIO23; interrupt is routed to a test point | Capacitive; GT911 or integrated ST7123/ST7121; I2C SDA GPIO31, SCL GPIO32, interrupt GPIO23 | CST816 capacitive touch; I2C SDA GPIO11, SCL GPIO10; interrupt GPIO4; reset via TCA9554 |
-| Wi-Fi and Bluetooth | ESP32-C6-MINI-1U-H8 coprocessor connected over SDIO; Wi-Fi 6 (2.4 GHz) and Bluetooth 5 LE. Wireless support is provided by the C6, not the P4. | ESP32-C6-MINI-1U over SDIO; 2.4 GHz Wi-Fi 6 and Bluetooth LE | Native ESP32-S3 2.4 GHz Wi-Fi (802.11 b/g/n) and Bluetooth 5 LE; no coprocessor |
-| Ethernet | IP101 10/100 Mbit/s Ethernet PHY; RJ45 is on the 86 Panel bottom board | No onboard Ethernet | None onboard |
-| Audio | ES8311 audio codec, ES7210 microphone ADC, onboard microphone and 8 ohm / 2 W speaker output | ES8388 codec, ES7210 dual-microphone front end; 8 ohm / 1 W speaker; 3.5 mm headphone jack | V2: ES8311 codec, ES7210 ADC, dual microphones, NS4150B amplifier; BOX speaker rated 4 ohm / 5 W |
-| Storage expansion | TF/microSD slot | microSD slot | TF/microSD slot |
-| USB | USB 2.0 High-Speed OTG and separate USB-to-UART interface | USB-A host and USB-C OTG | USB-C native USB 2.0 Full Speed |
-| RS485 | Interface on the ETH-2RO bottom board | SIT3088; switchable 120-ohm termination | None onboard |
-| Relays | Two isolated relay outputs on the ETH-2RO bottom board | None onboard | None onboard |
-| Camera | No camera fitted; the ETH-2RO main PCB omits the camera connector found on the LCD-4B variant | Onboard 2 MP MIPI-CSI camera; sensor varies by revision | None onboard |
-| Motion sensor | No onboard IMU listed | BMI270 accelerometer/gyroscope | No IMU listed |
-| RTC | Rechargeable RTC battery header; RTC hardware details are not specified in the board overview | RX8130CE RTC with supercapacitor backup | PCF85063; rechargeable RTC battery header |
-| Battery | RTC backup connection; main supply is external DC or USB-C | Removable NP-F550; included with TAB5 Kit, optional for standard TAB5 | 3.7 V lithium-battery connector with charging; battery supply varies by package |
-| Expansion | 2.0 mm expansion headers and ETH-2RO bottom-board connection | HY2.0-4P, M5-Bus, GPIO_EXT and STAMP pads | UART, shared I2C and reserved 28-pin header |
-| Power | DC 6-30 V input on the ETH-2RO bottom board; USB-C power/programming on the main board | USB-C, battery or 6-24 V RS485 power input | USB-C 5 V or 3.7 V battery |
+| Component | ESP32-P4-86-Panel-ETH-2RO | M5Stack TAB5 | Waveshare ESP32-S3-Touch-LCD-1.85C V2 | GUITION JC-ESP32P4-M3-DEV | ESP32-4848S040 |
+| --- | --- | --- | --- | --- | --- |
+| Project configuration | `waveshare86` | `tab5` | `waveshare185c` (`esp32s3`) | Not implemented | `esp32_4848s040` (`esp32s3`, speaker variant; hardware verification pending) |
+| Main processor | ESP32-P4NRW32, dual-core 32-bit RISC-V high-performance CPU up to 360 MHz, plus a low-power RISC-V core up to 40 MHz | ESP32-P4NRW32; dual-core RISC-V HP CPU at 360 MHz, LP core up to 40 MHz | ESP32-S3R8; dual-core Xtensa LX7, up to 240 MHz | ESP32-P4; dual-core RISC-V, 360 MHz (up to 400 MHz advertised) | ESP32-S3R8; dual-core, 240 MHz |
+| Chip / board revision | ESP32-P4 revision 1.3. Target pre-v3 silicon branch. | Firmware targets pre-v3 silicon; individual board revision not verified | Board V2 / Rev2.0; S3 silicon revision not verified | Not specified; silicon revision needs verification | Connected device reports ESP32-S3 revision v0.2; board revision not verified |
+| PSRAM | 32 MB up to 200 MHz | 32 MB; firmware configured for HEX mode at 200 MHz | 8 MB octal PSRAM, configured at 80 MHz | 32 MB in chip package | 8 MB |
+| Flash | 32 MB external SPI NOR flash | 16 MB SPI NOR flash | 16 MB SPI NOR flash | 16 MB NOR flash | 16 MB |
+| Display | 4-inch IPS, 720 x 720 pixels, 2-lane MIPI DSI; ST7703 driver; backlight enable GPIO33, PWM GPIO26, reset GPIO27 | 5-inch IPS, 1280 x 720 landscape; MIPI DSI; ILI9881C or ST7123/ST7121 depending on hardware revision; backlight GPIO22 | 1.85-inch round, 360 x 360; ST77916 over QSPI; backlight GPIO5 | MIPI-DSI and SPI interfaces; maximum advertised resolution 800 x 1280; attached panel not specified | 4-inch IPS TFT, 480 x 480 pixels; ST7701 driver; 16-bit RGB (65K colours); IPS full viewing angle |
+| Touch | GT911 five-point capacitive touch controller over I2C; SDA GPIO7, SCL GPIO8, reset GPIO23; interrupt is routed to a test point | Capacitive; GT911 or integrated ST7123/ST7121; I2C SDA GPIO31, SCL GPIO32, interrupt GPIO23 | CST816 capacitive touch; I2C SDA GPIO11, SCL GPIO10; interrupt GPIO4; reset via TCA9554 | Not specified | GT911 capacitive; I2C SDA GPIO19, SCL GPIO45; RESET/INT not connected; polled |
+| Wi-Fi and Bluetooth | ESP32-C6-MINI-1U-H8 coprocessor connected over SDIO; Wi-Fi 6 (2.4 GHz) and Bluetooth 5 LE. Wireless support is provided by the C6, not the P4. | ESP32-C6-MINI-1U over SDIO; 2.4 GHz Wi-Fi 6 and Bluetooth LE | Native ESP32-S3 2.4 GHz Wi-Fi (802.11 b/g/n) and Bluetooth 5 LE; no coprocessor | ESP32-C6 coprocessor; Wi-Fi 6 and Bluetooth 5.0 advertised; host connection not specified | Native ESP32-S3 2.4 GHz Wi-Fi and Bluetooth LE; no coprocessor |
+| Ethernet | IP101 10/100 Mbit/s Ethernet PHY; RJ45 is on the 86 Panel bottom board | No onboard Ethernet | None onboard | Not specified | Not specified |
+| Audio | ES8311 audio codec, ES7210 microphone ADC, onboard microphone and 8 ohm / 2 W speaker output | ES8388 codec, ES7210 dual-microphone front end; 8 ohm / 1 W speaker; 3.5 mm headphone jack | V2: ES8311 codec, ES7210 ADC, dual microphones, NS4150B amplifier; BOX speaker rated 4 ohm / 5 W | I2S interface; codec, amplifier and speaker not specified | NS4168 I2S speaker amplifier; BCLK GPIO1, LRCLK GPIO2, data GPIO40; software volume; single speaker connector |
+| Storage expansion | TF/microSD slot | microSD slot | TF/microSD slot | SDIO 3.0 interface; card slot not specified | microSD over SPI: SCK GPIO48, MOSI GPIO47, MISO GPIO41, CS GPIO42; shares LCD initialization pins |
+| USB | USB 2.0 High-Speed OTG and separate USB-to-UART interface | USB-A host and USB-C OTG | USB-C native USB 2.0 Full Speed | USB 2.0 High-Speed OTG | USB-to-UART (connected unit reports CH340); native USB pins used by touch/RGB |
+| RS485 | Interface on the ETH-2RO bottom board | SIT3088; switchable 120-ohm termination | None onboard | Not specified | Not specified |
+| Relays | Two isolated relay outputs on the ETH-2RO bottom board | None onboard | None onboard | Not specified | Other variants route GPIO1/2/40 to relays; this port requires the speaker wiring |
+| Camera | No camera fitted; the ETH-2RO main PCB omits the camera connector found on the LCD-4B variant | Onboard 2 MP MIPI-CSI camera; sensor varies by revision | None onboard | MIPI-CSI interface with ISP; fitted camera not specified | Not specified |
+| Motion sensor | No onboard IMU listed | BMI270 accelerometer/gyroscope | No IMU listed | Not specified | Not specified |
+| RTC | Rechargeable RTC battery header; RTC hardware details are not specified in the board overview | RX8130CE RTC with supercapacitor backup | PCF85063; rechargeable RTC battery header | Not specified | Not specified |
+| Battery | RTC backup connection; main supply is external DC or USB-C | Removable NP-F550; included with TAB5 Kit, optional for standard TAB5 | 3.7 V lithium-battery connector with charging; battery supply varies by package | Not specified | Battery connector fitted on the observed unit; chemistry, polarity and charging limits unconfirmed |
+| Expansion | 2.0 mm expansion headers and ETH-2RO bottom-board connection | HY2.0-4P, M5-Bus, GPIO_EXT and STAMP pads | UART, shared I2C and reserved 28-pin header | I2C, UART, TWAI, LED PWM, MCPWM, RMT and ADC interfaces | Not specified |
+| Power | DC 6-30 V input on the ETH-2RO bottom board; USB-C power/programming on the main board | USB-C, battery or 6-24 V RS485 power input | USB-C 5 V or 3.7 V battery | 5 V DC | 5 V; approximately 260 mA current draw |
 
 Hardware references: [Waveshare board documentation](https://docs.waveshare.com/ESP32-P4-WIFI6-Touch-LCD-4B),
 [M5Stack TAB5 specifications and pin map](https://docs.m5stack.com/en/core/Tab5),
@@ -106,13 +107,90 @@ and this firmware still require verification on the particular hardware revision
 Listed peripherals describe the hardware; p4Radio does not currently use every
 peripheral.
 
+The GUITION M Series JC-ESP32P4-M3-DEV is included for hardware reference;
+p4Radio does not yet have a board port or build configuration for it. Its entries
+above use the supplied specifications and have not been independently verified.
+Those specifications also list a 92 x 62 mm module, an operating range of
+-20 to +70 degrees C, 128 KB HP ROM, 16 KB LP ROM, 768 KB HP L2MEM,
+32 KB LP SRAM and 8 KB TCM, plus H.264 hardware encoding, digital signatures
+and a dedicated key management unit. Display, touch, audio wiring and the C6
+host connection need confirmation before implementing a port.
+
+The ESP32-4848S040 port targets the speaker variant with the NS4168 amplifier,
+480 x 480 ST7701 RGB panel and GT911 touch. Hardware pin assignments come from
+[the vendor pin table and demo mirror](https://github.com/NorthernMan54/ESP32-4848S040),
+with the panel sequence adapted from [Arduino_GFX's GUITION type 9 setup](https://github.com/moononournation/Arduino_GFX).
+The [NS4168 datasheet](https://github.com/NorthernMan54/ESP32-4848S040/blob/main/ESP32-4848S040/4-Driver_IC_Data_Sheet/Nsiway-NS4168.pdf)
+is also available there. Confirm the speaker routing: relay variants use the same
+GPIO1/2/40 pins and are not supported by this configuration.
+
+**ESP32-4848S040 speaker links:** some boards ship with the three 0-ohm
+resistors **R21, R22 and R23** missing, leaving the NS4168 amplifier disconnected
+from GPIO1 (BCLK), GPIO2 (LRCLK) and GPIO40 (audio data). The firmware can decode
+and write audio normally while the speaker remains silent. On the tested unit,
+audio worked after bridging the two pads of each missing resistor footprint.
+Fit 0-ohm links or individual solder bridges on affected speaker boards after
+confirming their revision and routing. See
+[ESP32-4848S040 missing speaker-link diagnosis and repair photos](https://gijin77.blog.jp/archives/44904481.html).
+
+Its supplied specifications also list 512 KB SRAM, 384 KB ROM,
+a 71.8 x 70.2 mm effective display area, 86.5 x 86.5 x 37.8 mm module dimensions,
+an operating range of -20 to +70 degrees C and a storage range of -30 to
++80 degrees C. The observed battery connector alone does not establish battery
+chemistry, connector polarity or safe charging voltage/current; confirm those
+against the particular board revision before connecting a cell. Battery metering
+and charger control are not implemented.
+
+### ESP32-4848S040 build and verification
+
+Select chip `esp32s3` and project configuration `esp32_4848s040` in the ESP-IDF
+extension. With ESP-IDF 6.1 initialized and that chip selected, build using:
+
+```sh
+idf.py --preset esp32_4848s040 -D SDKCONFIG=build/esp32_4848s040/sdkconfig build
+```
+
+The explicit SDKCONFIG argument also keeps IDF's CLI target precheck from reading
+an older root-level P4 `sdkconfig`. Board selection never overrides the chip.
+This port has its own SDK defaults, 16 MB partition table, build directory and
+`dependencies.esp32_4848s040.lock`. Build boards sequentially because downloaded
+components are shared. Back up the original flash before installing a different
+partition layout; do not erase NVS just to install this port.
+
+The LCD uses two PSRAM framebuffers and internal DMA bounce buffers. Its
+panel register setup follows the vendor's MADCTL=0x00 / COLMOD=0x60 sequence;
+the MCU buffers remain RGB565. During
+cache-disabled flash writes, its ISR is masked; VSYNC restart recovers DMA
+alignment afterwards. Check for transient display glitches when saving settings.
+Code and read-only data stay in flash to preserve PSRAM. Stereo is downmixed
+before buffering for this single-speaker board, retaining both channels in the
+mix and the full twenty-second PCM capacity (about 1.83 MiB at 48 kHz mono).
+The mono mix is duplicated into both I2S wire slots after software volume,
+so either NS4168 channel selection receives audio. A lifetime 4 KB PSRAM scratch
+buffer handles this at the speaker boundary. Other boards retain their existing
+audio channel handling. Preserve external TLS allocation.
+All three skins scale to 480 x 480; Circular retains inactive black corners.
+The shared drawing pool is about 1.33 MiB, and a screenshot temporarily needs
+another 450 KB. Peak memory and concurrent playback need hardware verification.
+
+On the board, check colours/orientation and touch alignment, all three cached
+skins, setup QR transitions, wrong-password AP fallback, NVS round-trip, volume
+and click feedback, uninterrupted MP3/AAC/BBC HLS playback, TUNE, OFF/tap wake,
+and repeated SD screenshots during playback (including missing/full cards and
+retry after a failed mount). Firmware compilation and host checks do not verify
+these hardware behaviours. Compile-time channel downmix checks run with
+`xtensa-esp32s3-elf-g++ -std=gnu++26 -fsyntax-only -I main tools/check_pcm_channels.cpp`
+(and the P4 compiler); these check PCM arithmetic, in-place compaction and duplication into both I2S
+slots, not
+physical speaker output.
+
 ## Radio controls and setup
 
 At first boot, the radio opens the unsecured `p4Radio-Setup` Wi-Fi network. Join it from a phone; its captive portal scans nearby networks and saves the chosen SSID and password in NVS before connecting. After Wi-Fi comes up, p4Radio fetches the selected BBC HLS playlist, extracts AAC audio from its MPEG-TS segments, and sends decoded audio to the selected board's codec and speaker output. The five presets are BBC Radio 1, 2, 4, 4 Extra, and 5 Live; Radio 4 Extra fills the repeated BBC 4 entry in the original list. Station and volume selections are retained across restarts.
 
 The display has previous/next station, volume down/up, OFF, and TUNE controls. OFF uses an awake idle mode so touch polling and Wi-Fi remain active; tapping the dark screen resumes playback. This consumes more power than deep sleep. On the Waveshare 86 panel, the GT911 interrupt is not connected to an MCU GPIO, so deep sleep cannot provide touch wake.
 
-On the P4 boards, Wi-Fi provisioning and playback require a compatible ESP32-C6 ESP-Hosted slave image. The S3 board uses its native Wi-Fi. The P4 host dependencies are pinned in [`main/idf_component.yml`](main/idf_component.yml). Waveshare's published examples do not include the C6 image, so a board with a missing or incompatible image cannot provide the setup AP until its C6 firmware is installed. The app reports that link failure on screen.
+On the P4 boards, Wi-Fi provisioning and playback require a compatible ESP32-C6 ESP-Hosted slave image. The S3 boards use their native Wi-Fi. The P4 host dependencies are pinned in [`main/idf_component.yml`](main/idf_component.yml). Waveshare's published examples do not include the C6 image, so a board with a missing or incompatible image cannot provide the setup AP until its C6 firmware is installed. The app reports that link failure on screen.
 
 ### Station browser and saved stations
 

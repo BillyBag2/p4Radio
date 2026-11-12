@@ -13,6 +13,14 @@ static_assert(skin_coordinate(360, 1080) == 540);
 static_assert(skin_layout_side(360, 360, true, false) == 254);
 static_assert(skin_layout_side(360, 360, true, true) == 360);
 static_assert(skin_layout_side(1280, 720, false, false) == 720);
+// GUITION 4848S040: square glass, with full-size square and circular layouts.
+static_assert(skin_layout_side(480, 480, false, false) == 480);
+static_assert(skin_layout_side(480, 480, false, true) == 480);
+static_assert(skin_font_size(24, 480) == 16);
+static_assert(skin_font_size(40, 480) == 24);
+static_assert(skin_font_size(48, 480) == 24);
+static_assert(skin_circle_contains(240, 240, 0, 0, 480));
+static_assert(!skin_circle_contains(0, 0, 0, 0, 480));
 static_assert(skin_drawing_pool_bytes(720, 720) == 3 * 1024 * 1024);
 static_assert(skin_drawing_pool_bytes(360, 360) == 768 * 1024);
 static_assert(skin_font_size(24, 720) == 24);

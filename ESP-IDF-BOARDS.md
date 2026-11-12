@@ -29,12 +29,16 @@ Start with the following board definitions:
 | `jc8012` | `esp32p4` |
 | `esp32s3` | `esp32s3` |
 | `waveshare185c` | `esp32s3` |
+| `esp32_4848s040` | `esp32s3` |
 | `linux` | `linux` |
 
 Additional boards must be added to the central board list, CMake presets and board-specific source directories.
 
-In p4Radio, `waveshare86`, `tab5` and `waveshare185c` are implemented. The latter
-is the ESP32-S3-Touch-LCD-1.85C V2 and requires `esp32s3`. The remaining entries above
+In p4Radio, `waveshare86`, `tab5`, `waveshare185c` and `esp32_4848s040` are implemented.
+The two S3 ports require `esp32s3`: Waveshare 1.85C V2 and GUITION 4848S040
+with NS4168 speaker wiring (not the relay variant). The GUITION port uses
+`sdkconfig.esp32_4848s040`, `partitions.esp32_4848s040.csv` and
+`dependencies.esp32_4848s040.lock`; its hardware verification is pending. The remaining entries above
 describe planned ports, not selectable configurations. TAB5 uses its own managed
 BSP, SDK defaults, 16 MB partition table and `dependencies.tab5.lock`; Waveshare
 retains `dependencies.lock`. S3 dependency versions are pinned in
@@ -485,6 +489,8 @@ The following combinations must produce these results:
 | `waveshare86` | `esp32p4` | Pass |
 | `waveshare185c` | `esp32s3` | Pass |
 | `waveshare185c` | `esp32p4` | Fail |
+| `esp32_4848s040` | `esp32s3` | Pass |
+| `esp32_4848s040` | `esp32p4` | Fail |
 | `jc8012` | `esp32p4` | Pass |
 | `esp32s3` | `esp32s3` | Pass |
 | `esp32s3` | `esp32p4` | Fail |

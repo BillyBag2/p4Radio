@@ -11,6 +11,8 @@ namespace p4radio {
 // the existing LVGL and speaker locking/lifecycle responsibilities.
 void board_init();
 esp_codec_dev_handle_t board_speaker_init();
+// Downmix before buffering on boards with a single mono amplifier.
+bool board_speaker_is_mono();
 bool board_display_start();
 bool board_display_is_round();
 // Only the screenshot worker mounts/unmounts storage. Never format on failure.

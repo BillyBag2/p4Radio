@@ -42,8 +42,38 @@
       },
       "cacheVariables": {
         "SDKCONFIG": "build/waveshare185c/sdkconfig",
-        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.waveshare185c",
-        "IDF_TARGET": "esp32p4"
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.waveshare185c"
+      }
+    },
+    {
+      "name": "esp32_4848s040",
+      "displayName": "GUITION ESP32-4848S040 (speaker)",
+      "generator": "Ninja",
+      "binaryDir": "build/esp32_4848s040",
+      "environment": {
+        "MY_BOARD": "esp32_4848s040"
+      },
+      "cacheVariables": {
+        "SDKCONFIG": "build/esp32_4848s040/sdkconfig",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.esp32_4848s040",
+        "IDF_TARGET": "esp32s3"
+      },
+      "vendor": {
+        "espressif/vscode-esp-idf": {
+          "schemaVersion": 1,
+          "settings": [
+            {
+              "type": "openOCD",
+              "value": {
+                "debugLevel": 2,
+                "configs": [
+                  "board/esp32s3-builtin.cfg"
+                ],
+                "args": []
+              }
+            }
+          ]
+        }
       }
     }
   ]

@@ -6,7 +6,8 @@ For work on supporting additional hardware, follow the multi-board strategy in
 [ESP-IDF-BOARDS.md](ESP-IDF-BOARDS.md). It defines board selection via `MY_BOARD`,
 chip compatibility checks without overriding `IDF_TARGET`, per-board build and
 SDK configuration isolation, and shared board interfaces. Implemented boards are
-`waveshare86` and `tab5` (both `esp32p4`), and `waveshare185c` (`esp32s3`, V2 / Rev2.0).
+`waveshare86` and `tab5` (both `esp32p4`), `waveshare185c` (`esp32s3`, V2 / Rev2.0)
+and `esp32_4848s040` (`esp32s3`, GUITION speaker variant; hardware verification pending).
 The Waveshare 86-specific
 requirements below describe the current hardware and must be preserved for that board.
 
@@ -29,7 +30,7 @@ sequence finishes at the active level, which must leave C6 EN/GPIO15 high.
 Do not copy the old vendor demo's active-low setting; it holds C6 in reset with
 current ESP-Hosted. Update existing active SDK configuration as well as defaults.
 Dependency locks are `dependencies.lock` (Waveshare 86), `dependencies.tab5.lock`
-and `dependencies.waveshare185c.lock`.
+`dependencies.waveshare185c.lock` and `dependencies.esp32_4848s040.lock`.
 The generated `build/active-board` marker triggers reconfiguration when switching
 boards because IDF manages shared downloaded components. Build boards sequentially.
 On rectangular displays, skins fit a centered square whose side is the shorter edge; Circular
@@ -43,6 +44,25 @@ Its board module owns QSPI LCD, TCA9554 resets, CST816 touch and audio wiring.
 Keep `CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y` for the 1.85C: internal-only TLS
 allocation can fail once decoding starts. Preserve the twenty-second PCM buffer.
 Square skins are inscribed in the physically round panel; Circular fills it.
+
+The ESP32-4848S040 port uses an ST7701 RGB panel, polled GT911 and NS4168 I2S
+amplifier. Keep the vendor panel register values MADCTL=0x00 and
+COLMOD=0x60 with the MCU RGB565 framebuffer; do not infer the panel input mode
+from the framebuffer word width. The legacy vendor driver's `bgr=true` flag
+emits MADCTL=0x00 (the opposite of IDF's BGR enum). GPIO1/2/40 must be routed to the speaker, not the relay variant.
+Stereo is averaged to mono before its twenty-second PCM queue; source metadata
+and duration remain based on decoder output. In the board's `speaker.cpp`, duplicate
+mono into both I2S wire slots after software gain: the codec library's default
+mono path only drives LEFT, but NS4168 CTRL may select RIGHT. Retain the lifetime
+4 KB PSRAM scratch buffer and existing speaker serialization. Other boards
+retain their channel handling. LCD initialization and SD SPI share GPIO47/48: release the 3-wire
+panel IO with LCD CS held inactive before mounting SD. Keep its native Wi-Fi,
+16 MB flash/8 MB OPI PSRAM, external TLS and board-specific dependency lock.
+Do not copy code/rodata into PSRAM: graphics/media/PCM need that space. RGB
+interrupts must be masked during cache-disabled flash writes; VSYNC restart
+recovers DMA alignment. Verify settings writes during playback on hardware.
+The observed battery connector does not establish chemistry, polarity or charge
+limits; battery metering and charger control are not implemented.
 
 Read the relevant source before changing behavior. README contains historical
 descriptions as well as current instructions; check implementation when they
@@ -259,3 +279,8 @@ compile time for frame counts, mono/stereo block continuity, clamping and reset.
 The five-second playback log counts input/output frames only after codec write
 success and reports their applied average correction. This verifies the digital
 path; physical DAC timing and long-run buffer stability still need board checks.
+
+Mono downmix checks: compile `tools/check_pcm_channels.cpp` with the same flags
+on both P4 and S3 compilers. Check mono/stereo streams, both input channels,
+volume/click feedback, twenty-second capacity, cached skins and screenshots on
+the ESP32-4848S040 speaker hardware; host checks do not verify the amplifier.

@@ -1,6 +1,7 @@
 #include "radio.hpp"
 #include "button_audio.hpp"
 #include "buffer_sync.hpp"
+#include "pcm_channels.hpp"
 #include "hls_http.hpp"
 #include "stream_input.hpp"
 #include "station_rules.hpp"
@@ -233,6 +234,7 @@ bool play_stream(const Station &station, int station_index)
     bool output_task_started = false;
     bool audio_open = false;
     bool first_audio = true;
+    bool downmix_to_mono = false;
     bool failed = false;
     bool cached = cached_stream(station_index) == playlist_url;
     TickType_t last_audio_tick = xTaskGetTickCount();
@@ -393,15 +395,26 @@ bool play_stream(const Station &station, int station_index)
                 if (first_audio) {
                     esp_audio_simple_dec_info_t info{};
                     if (esp_audio_simple_dec_get_info(decoder, &info) != ESP_AUDIO_ERR_OK ||
-                        info.bits_per_sample != 16 || (info.channel != 1 && info.channel != 2) || !open_speaker(info)) {
+                        info.bits_per_sample != 16 || (info.channel != 1 && info.channel != 2)) {
                         set_status("Audio codec setup failed");
                         failed = true;
                         raw.len = 0;
                         break;
                     }
                     g_stream_channels.store(info.channel);
+                    downmix_to_mono = board_speaker_is_mono() && info.channel == 2;
+                    // Stream metadata and segment duration still describe the
+                    // decoder's source. Only the speaker/PCM queue become mono.
+                    auto speaker_info = info;
+                    if (downmix_to_mono) speaker_info.channel = 1;
+                    if (!open_speaker(speaker_info)) {
+                        set_status("Audio codec setup failed");
+                        failed = true;
+                        raw.len = 0;
+                        break;
+                    }
                     if (info.bitrate) g_stream_kbps.store(station_rules::decoder_bitrate_kbps(info.bitrate));
-                    audio.frame_bytes = info.channel * (info.bits_per_sample / 8);
+                    audio.frame_bytes = speaker_info.channel * (info.bits_per_sample / 8);
                     audio.bytes_per_second = static_cast<size_t>(info.sample_rate) * audio.frame_bytes;
                     if (!audio.frame_bytes || !audio.bytes_per_second || audio.bytes_per_second > 768000) {
                         failed = true;
@@ -424,17 +437,29 @@ bool play_stream(const Station &station, int station_index)
                              source.mp3 ? "MP3" : "AAC", source.hls ? "HLS" : "HTTP",
                              static_cast<unsigned long>(info.sample_rate), static_cast<unsigned>(info.channel),
                              static_cast<unsigned>(info.bits_per_sample));
+                    if (downmix_to_mono) ESP_LOGI(kTag, "Downmixing stereo to mono for the board speaker");
                     set_status("Filling audio buffer to half capacity...");
                 }
                 if (audio_open) {
+                    size_t queued_bytes = decoded.decoded_size;
+                    if (downmix_to_mono) {
+                        if (queued_bytes % (2 * sizeof(int16_t))) {
+                            set_status("Incomplete stereo PCM frame");
+                            failed = true;
+                            break;
+                        }
+                        downmix_stereo_to_mono(reinterpret_cast<int16_t *>(decoded.buffer),
+                                              queued_bytes / (2 * sizeof(int16_t)));
+                        queued_bytes /= 2;
+                    }
                     size_t sent = 0;
                     const int64_t queue_started = esp_timer_get_time();
                     // Keep reading/decoding at the source's arrival rate. Only
                     // the bounded PCM queue applies backpressure when full;
                     // the ten-second level is a resampling target, not a cap.
-                    while (sent < decoded.decoded_size && !audio_cancelled(audio) && !audio.error.load()) {
+                    while (sent < queued_bytes && !audio_cancelled(audio) && !audio.error.load()) {
                         sent += xStreamBufferSend(audio.stream, decoded.buffer + sent,
-                            decoded.decoded_size - sent, pdMS_TO_TICKS(20));
+                            queued_bytes - sent, pdMS_TO_TICKS(20));
                     }
                     queue_us += esp_timer_get_time() - queue_started;
                     if (audio.error.load()) { failed = true; break; }

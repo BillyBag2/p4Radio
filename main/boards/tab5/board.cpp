@@ -96,5 +96,6 @@ void board_display_unlock() { bsp_display_unlock(); }
 esp_err_t board_display_brightness_set(int percent) { return bsp_display_brightness_set(percent); }
 esp_err_t board_display_backlight_off() { return bsp_display_backlight_off(); }
 bool board_display_is_round() { return false; }
+bool board_speaker_is_mono() { return false; }
 
 } // namespace p4radio
