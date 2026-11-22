@@ -230,6 +230,7 @@ esp_err_t board_display_brightness_set(int percent)
 }
 esp_err_t board_display_backlight_off() { return board_display_brightness_set(0); }
 bool board_display_is_round() { return true; }
+bool board_speaker_is_mono() { return false; }
 
 const char *board_sdcard_path() { return "/sdcard"; }
 esp_err_t board_sdcard_mount()

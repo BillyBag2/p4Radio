@@ -1,7 +1,9 @@
 #include "radio.hpp"
 #include "button_audio.hpp"
 #include "station_catalog.hpp"
+#if !P4RADIO_HEADLESS
 #include "advanced.hpp"
+#endif
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -18,6 +20,14 @@
 #include "freertos/task.h"
 #include "nvs.h"
 #include "mdns.h"
+
+extern const char navigation_css[] asm("_binary_navigation_css_start");
+
+#if P4RADIO_HEADLESS
+#define P4RADIO_ADVANCED_TAB ""
+#else
+#define P4RADIO_ADVANCED_TAB R"HTML(<a href="/advanced">Advanced</a>)HTML"
+#endif
 
 namespace p4radio {
 
@@ -83,19 +93,62 @@ esp_err_t portal_page(httpd_req_t *request)
 {
     ESP_LOGI(kTag, "Setup page requested: %s", request->uri);
     static constexpr char page[] = R"HTML(<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>p4Radio Wi-Fi setup</title><link rel="stylesheet" href="/navigation.css"><style>
-body{font:17px system-ui;background:#101827;color:#f3f6fb;margin:0;padding:24px}main{max-width:480px;margin:auto;background:#1b2638;padding:24px;border-radius:18px}h1{margin-top:0}label{display:block;margin:16px 0 6px}input,select,button{box-sizing:border-box;width:100%;padding:13px;border:0;border-radius:9px;font:inherit}button{background:#60d6ad;font-weight:700;margin-top:18px}small{color:#a8b7ca}</style></head><body><main><h1>Connect p4Radio</h1><nav class="page-tabs" aria-label="Settings pages"><a href="/">Radio</a><a href="/stations">Stations</a><a href="/wifi" aria-current="page">Wi-Fi</a><a href="/advanced">Advanced</a></nav><p>Choose your Wi-Fi network and enter its password. Your details stay on this radio.</p><form method="post" action="/connect"><label for="hostname">Host name</label><input id="hostname" name="hostname" maxlength="32" pattern="[a-z0-9]+([a-z0-9\-]*[a-z0-9])?" value="HOSTNAME_VALUE" required><small>Open http://&lt;hostname&gt;.local/ on your network.</small><label for="ssid">Wi-Fi network</label><select id="networks" onchange="document.getElementById('ssid').value=this.value"><option value="">Scanning…</option></select><input id="ssid" name="ssid" maxlength="32" placeholder="Network name" required><label for="password">Password</label><input id="password" name="password" type="password" maxlength="64" autocomplete="current-password"><button>Save and connect</button></form><p><small>If the list is empty, type the network name. This open setup network does not provide internet.</small></p></main><script>fetch('/api/scan').then(r=>r.json()).then(a=>{let s=document.getElementById('networks');s.innerHTML='<option value="">Select a network…</option>';a.forEach(n=>{let o=document.createElement('option');o.value=n;o.textContent=n;s.appendChild(o)})}).catch(()=>{});</script></body></html>)HTML";
+body{font:17px system-ui;background:#101827;color:#f3f6fb;margin:0;padding:24px}main{max-width:480px;margin:auto;background:#1b2638;padding:24px;border-radius:18px}h1{margin-top:0}label{display:block;margin:16px 0 6px}input,select,button{box-sizing:border-box;width:100%;padding:13px;border:0;border-radius:9px;font:inherit}button{background:#60d6ad;font-weight:700;margin-top:18px}small{color:#a8b7ca}</style></head><body><main><h1>Connect p4Radio</h1><nav class="page-tabs" aria-label="Settings pages"><a href="/">Radio</a><a href="/stations">Stations</a><a href="/wifi" aria-current="page">Wi-Fi</a>)HTML" P4RADIO_ADVANCED_TAB R"HTML(</nav><p>Choose your Wi-Fi network and enter its password. Your details stay on this radio.</p><form method="post" action="/connect"><label for="hostname">Host name</label><input id="hostname" name="hostname" maxlength="32" pattern="[a-z0-9]+([a-z0-9\-]*[a-z0-9])?" value="HOSTNAME_VALUE" required><small>Open http://&lt;hostname&gt;.local/ on your network.</small><label for="ssid">Wi-Fi network</label>
+<input id="ssid" name="ssid" maxlength="32" placeholder="Network name" required>
+<button id="scan-networks" type="button">Scan for networks</button>
+<label for="networks">Nearby networks</label>
+<select id="networks" disabled><option value="">Choose a nearby network</option></select>
+<small id="scan-status" role="status"></small>
+<label for="password">Password</label>
+<input id="password" name="password" type="password" maxlength="64">
+<button>Save and connect</button></form>
+<p><small>This open setup network does not provide internet.</small></p></main>
+<script>
+const ssid = document.getElementById('ssid');
+const networks = document.getElementById('networks');
+const scanButton = document.getElementById('scan-networks');
+const scanStatus = document.getElementById('scan-status');
+async function scanNetworks(){
+    scanButton.disabled = true;
+    networks.disabled = true;
+    networks.replaceChildren(new Option('Choose a nearby network', ''));
+    scanStatus.textContent = 'Scanning for nearby networks…';
+    try {
+        const response = await fetch('/api/scan', {cache:'no-store'});
+        if (!response.ok) throw new Error('Scan failed');
+        const results = await response.json();
+        results.forEach(name => networks.add(new Option(name, name)));
+        networks.disabled = results.length === 0;
+        scanStatus.textContent = results.length ? '' : 'No networks found. Enter the network name above.';
+    } catch {
+        scanStatus.textContent = 'Scan unavailable. You can still enter the network name above.';
+    } finally {
+        scanButton.disabled = false;
+    }
+}
+scanButton.addEventListener('click', scanNetworks);
+networks.addEventListener('change', () => { if (networks.value) ssid.value = networks.value; });
+if (AUTO_SCAN_WIFI) scanNetworks();
+</script></body></html>)HTML";
     httpd_resp_set_type(request, "text/html; charset=utf-8");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     std::string rendered = page;
     const size_t marker = rendered.find("HOSTNAME_VALUE");
     if (marker != std::string::npos) rendered.replace(marker, std::strlen("HOSTNAME_VALUE"), hostname_copy());
+    // An automatic scan can interrupt the setup AP and holds the HTTP task.
+    const size_t scan_mode = rendered.find("AUTO_SCAN_WIFI");
+    rendered.replace(scan_mode, std::strlen("AUTO_SCAN_WIFI"), g_portal_active.load() ? "false" : "true");
     return httpd_resp_send(request, rendered.c_str(), rendered.size());
 }
 
 esp_err_t scan_networks(httpd_req_t *request)
 {
     wifi_scan_config_t scan{};
-    esp_err_t err = esp_wifi_scan_start(&scan, true);
+    const int64_t started = esp_timer_get_time();
+    ESP_LOGI(kTag, "Wi-Fi scan requested");
+    const esp_err_t err = esp_wifi_scan_start(&scan, true);
+    ESP_LOGI(kTag, "Wi-Fi scan returned %s after %lld ms", esp_err_to_name(err),
+             static_cast<long long>((esp_timer_get_time() - started) / 1000));
     if (err != ESP_OK && err != ESP_ERR_WIFI_STATE) {
         return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "Wi-Fi scan failed");
     }
@@ -236,7 +289,11 @@ esp_err_t connection_state(httpd_req_t *request)
 esp_err_t settings_page(httpd_req_t *request)
 {
     static constexpr char page[] = R"HTML(<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Radio settings</title><link rel="stylesheet" href="/navigation.css"><style>
-body{font:17px system-ui;background:#101827;color:#f3f6fb;margin:0;padding:24px}main{max-width:480px;margin:auto;background:#1b2638;padding:24px;border-radius:18px}label{display:block;margin:18px 0 8px}input[type=text],select,button{box-sizing:border-box;width:100%;padding:13px;border:0;border-radius:9px;font:inherit}input[type=checkbox]{width:22px;height:22px;vertical-align:middle;margin-right:10px}button{background:#60d6ad;margin-top:24px;font-weight:bold}a{color:#60d6ad}small{display:block;color:#c4cede;margin-top:8px}</style></head><body><main><h1>Radio settings</h1><nav class="page-tabs" aria-label="Settings pages"><a href="/" aria-current="page">Radio</a><a href="/stations">Stations</a><a href="/wifi">Wi-Fi</a><a href="/advanced">Advanced</a></nav>SAVED_MESSAGE<form method="post" action="/settings"><label for="hostname">Host name</label><input id="hostname" type="text" name="hostname" value="HOSTNAME_VALUE" minlength="1" maxlength="32" pattern="[a-z0-9]+([a-z0-9\-]*[a-z0-9])?" autocapitalize="none" spellcheck="false" oninput="this.value=this.value.toLowerCase()" required><small>Use 1-32 letters (a-z), digits or hyphens. Start and end with a letter or digit. Do not include .local.</small><label for="skin">Display skin</label><select id="skin" name="skin">SKIN_OPTIONS</select><small>Changes the screen layout immediately and remembers your choice.</small><label><input type="checkbox" name="volume_bar" value="1" VOLUME_CHECKED>Show volume bar</label><label><input type="checkbox" name="buffer_bar" value="1" BUFFER_CHECKED>Show buffer bar</label><label><input type="checkbox" name="power_meter" value="1" METER_CHECKED>Show power meter</label><label for="max_bitrate">Desired stream bitrate</label><select id="max_bitrate" name="max_bitrate">BITRATE_OPTIONS</select><small>Chooses the highest available rate at or below this value. If none fit, uses the lowest available rate. Unlimited chooses the highest rate. Changing this retunes the radio.</small><button>Save settings</button></form><p>Radio address: <a href="http://HOSTNAME_VALUE.local/">http://HOSTNAME_VALUE.local/</a></p></main></body></html>)HTML";
+body{font:17px system-ui;background:#101827;color:#f3f6fb;margin:0;padding:24px}main{max-width:480px;margin:auto;background:#1b2638;padding:24px;border-radius:18px}label{display:block;margin:18px 0 8px}input[type=text],select,button{box-sizing:border-box;width:100%;padding:13px;border:0;border-radius:9px;font:inherit}input[type=checkbox]{width:22px;height:22px;vertical-align:middle;margin-right:10px}button{background:#60d6ad;margin-top:24px;font-weight:bold}a{color:#60d6ad}small{display:block;color:#c4cede;margin-top:8px}</style></head><body><main><h1>Radio settings</h1><nav class="page-tabs" aria-label="Settings pages"><a href="/" aria-current="page">Radio</a><a href="/stations">Stations</a><a href="/wifi">Wi-Fi</a>)HTML" P4RADIO_ADVANCED_TAB R"HTML(</nav>SAVED_MESSAGE<form method="post" action="/settings"><label for="hostname">Host name</label><input id="hostname" type="text" name="hostname" value="HOSTNAME_VALUE" minlength="1" maxlength="32" pattern="[a-z0-9]+([a-z0-9\-]*[a-z0-9])?" autocapitalize="none" spellcheck="false" oninput="this.value=this.value.toLowerCase()" required><small>Use 1-32 letters (a-z), digits or hyphens. Start and end with a letter or digit. Do not include .local.</small>)HTML"
+#if !P4RADIO_HEADLESS
+    R"HTML(<label for="skin">Display skin</label><select id="skin" name="skin">SKIN_OPTIONS</select><small>Changes the screen layout immediately and remembers your choice.</small><label><input type="checkbox" name="volume_bar" value="1" VOLUME_CHECKED>Show volume bar</label><label><input type="checkbox" name="buffer_bar" value="1" BUFFER_CHECKED>Show buffer bar</label><label><input type="checkbox" name="power_meter" value="1" METER_CHECKED>Show power meter</label>)HTML"
+#endif
+    R"HTML(<label for="max_bitrate">Desired stream bitrate</label><select id="max_bitrate" name="max_bitrate">BITRATE_OPTIONS</select><small>Chooses the highest available rate at or below this value. If none fit, uses the lowest available rate. Unlimited chooses the highest rate. Changing this retunes the radio.</small><button>Save settings</button></form><p>Radio address: <a href="http://HOSTNAME_VALUE.local/">http://HOSTNAME_VALUE.local/</a></p></main></body></html>)HTML";
     std::string rendered = page;
     const auto replace_all = [&rendered](const std::string &token, const std::string &value) {
         size_t position = 0;
@@ -253,6 +310,7 @@ body{font:17px system-ui;background:#101827;color:#f3f6fb;margin:0;padding:24px}
     }
     replace_all("BITRATE_OPTIONS", options);
     replace_all("HOSTNAME_VALUE", hostname_copy());
+#if !P4RADIO_HEADLESS
     replace_all("VOLUME_CHECKED", g_show_volume_bar.load() ? "checked" : "");
     replace_all("BUFFER_CHECKED", g_show_buffer_bar.load() ? "checked" : "");
     replace_all("METER_CHECKED", g_show_power_meter.load() ? "checked" : "");
@@ -263,6 +321,7 @@ body{font:17px system-ui;background:#101827;color:#f3f6fb;margin:0;padding:24px}
             (skin == option.id ? " selected" : "") + ">" + option.name + "</option>";
     }
     replace_all("SKIN_OPTIONS", skin_options);
+#endif
     char query[64] = {}, saved[8] = {};
     const bool saved_ok = httpd_req_get_url_query_str(request, query, sizeof(query)) == ESP_OK &&
         httpd_query_key_value(query, "saved", saved, sizeof(saved)) == ESP_OK && std::strcmp(saved, "1") == 0;
@@ -283,25 +342,35 @@ esp_err_t update_settings(httpd_req_t *request)
         if (count <= 0) return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Incomplete settings form");
         received += count;
     }
-    std::string hostname = form_value(body, "hostname");
-    std::transform(hostname.begin(), hostname.end(), hostname.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    WebSettings settings;
+    settings.hostname = form_value(body, "hostname");
+    std::transform(settings.hostname.begin(), settings.hostname.end(), settings.hostname.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    if (!valid_hostname(settings.hostname))
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Use a 1-32 character host name with letters, digits and internal hyphens");
+#if !P4RADIO_HEADLESS
     const std::string volume = form_value(body, "volume_bar"), buffer = form_value(body, "buffer_bar");
     const std::string meter = form_value(body, "power_meter");
-    if (!valid_hostname(hostname) || (!meter.empty() && meter != "1") || (!volume.empty() && volume != "1") || (!buffer.empty() && buffer != "1"))
-        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Use a 1-32 character host name with letters, digits and internal hyphens");
+    if ((!meter.empty() && meter != "1") || (!volume.empty() && volume != "1") || (!buffer.empty() && buffer != "1"))
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Invalid display settings");
+    settings.volume_bar = volume == "1";
+    settings.buffer_bar = buffer == "1";
+    settings.power_meter = meter == "1";
+#endif
     const std::string rate_text = form_value(body, "max_bitrate");
-    int max_bitrate = -1;
-    for (int rate : kStandardBitrates) if (rate_text == std::to_string(rate)) max_bitrate = rate;
-    if (max_bitrate < 0) return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Select a standard desired bitrate");
+    settings.max_bitrate = -1;
+    for (int rate : kStandardBitrates) if (rate_text == std::to_string(rate)) settings.max_bitrate = rate;
+    if (settings.max_bitrate < 0) return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Select a standard desired bitrate");
+#if !P4RADIO_HEADLESS
     const std::string skin_text = form_value(body, "skin");
-    DisplaySkinId skin = DisplaySkinId::Square;
     bool found_skin = false;
     for (const auto &option : kDisplaySkins) {
-        if (skin_text == option.value) { skin = option.id; found_skin = true; break; }
+        if (skin_text == option.value) { settings.skin = option.id; found_skin = true; break; }
     }
     if (!found_skin)
         return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Select a valid display skin");
-    const esp_err_t result = save_web_settings(hostname, volume == "1", buffer == "1", max_bitrate, meter == "1", skin);
+#endif
+    const esp_err_t result = save_web_settings(settings);
     if (result != ESP_OK) {
         ESP_LOGE(kTag, "Save web settings: %s", esp_err_to_name(result));
         return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR, "Could not save settings");
@@ -311,6 +380,13 @@ esp_err_t update_settings(httpd_req_t *request)
     httpd_resp_set_hdr(request, "Location", "/?saved=1");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     return httpd_resp_send(request, nullptr, 0);
+}
+
+esp_err_t navigation_styles(httpd_req_t *request)
+{
+    httpd_resp_set_type(request, "text/css; charset=utf-8");
+    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
+    return httpd_resp_send(request, navigation_css, HTTPD_RESP_USE_STRLEN);
 }
 
 void start_setup_http()
@@ -341,14 +417,18 @@ void start_setup_http()
     const httpd_uri_t settings_post{.uri = "/settings", .method = HTTP_POST, .handler = update_settings, .user_ctx = nullptr};
     ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &settings_get));
     ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &settings_post));
+    const httpd_uri_t nav_css{.uri = "/navigation.css", .method = HTTP_GET, .handler = navigation_styles, .user_ctx = nullptr};
+    ESP_ERROR_CHECK(httpd_register_uri_handler(g_http_server, &nav_css));
     register_station_http(g_http_server);
+#if !P4RADIO_HEADLESS
     register_advanced_http(g_http_server);
+#endif
 }
 
-void start_portal()
+bool start_portal()
 {
     if (g_portal_active.exchange(true)) {
-        return;
+        return true;
     }
     g_setup_submitted.store(false);
     wifi_config_t ap{};
@@ -365,26 +445,35 @@ void start_portal()
         g_portal_active.store(false);
         ESP_LOGE(kTag, "Setup AP failed: %s", esp_err_to_name(error));
         set_status("Setup AP could not start; restart to retry");
-        return;
+        return false;
     }
 
-    start_setup_http();
     set_status("Setup Wi-Fi: join p4Radio-Setup");
+#if P4RADIO_HEADLESS
+    ESP_LOGI(kTag, "Setup page: http://192.168.4.1/wifi");
+#endif
+    return true;
 }
 
 void stop_portal()
 {
     g_portal_active.store(false);
+#if !P4RADIO_HEADLESS
     g_ap_clients.store(0);
+#endif
     esp_wifi_set_mode(WIFI_MODE_STA);
 }
 
 void wifi_event_handler(void *, esp_event_base_t base, int32_t id, void *)
 {
+#if !P4RADIO_HEADLESS
     if (base == WIFI_EVENT && (id == WIFI_EVENT_AP_STACONNECTED || id == WIFI_EVENT_AP_STADISCONNECTED)) {
         wifi_sta_list_t clients{};
         if (esp_wifi_ap_get_sta_list(&clients) == ESP_OK) g_ap_clients.store(clients.num);
-    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+        return;
+    }
+#endif
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         if (g_saved_ssid[0] && g_join_allowed.load()) {
             g_join_deadline_us.store(esp_timer_get_time() + kJoinTimeoutUs);
             esp_wifi_connect();
@@ -460,8 +549,6 @@ bool ensure_network_stack()
     wifi_init_config_t wifi_config = WIFI_INIT_CONFIG_DEFAULT();
     const esp_err_t wifi_init_result = esp_wifi_init(&wifi_config);
     if (wifi_init_result != ESP_OK) {
-        // ESP-Hosted 2.12.11's connect call can report success even when SDIO
-        // setup failed. Catch the actual Wi-Fi failure rather than aborting.
         ESP_LOGE(kTag, "Wi-Fi initialization failed: %s (%d)",
                  esp_err_to_name(wifi_init_result), static_cast<int>(wifi_init_result));
         set_status("Wi-Fi initialization failed; check board/network hardware");
@@ -470,8 +557,8 @@ bool ensure_network_stack()
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, nullptr));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, nullptr));
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(g_saved_ssid[0] ? WIFI_MODE_STA : WIFI_MODE_APSTA));
     if (g_saved_ssid[0]) {
+        ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
         wifi_config_t station{};
         // ESP-IDF uses fixed-width fields: shorter values retain zero padding;
         // maximum-length SSIDs/hex PSKs occupy the entire field without a NUL.
@@ -481,6 +568,10 @@ bool ensure_network_stack()
                     std::min(std::strlen(g_saved_password), sizeof(station.sta.password)));
         station.sta.threshold.authmode = WIFI_AUTH_OPEN;
         ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &station));
+    } else {
+        // Configure the setup network before it starts beaconing.
+        // Changing the AP config after esp_wifi_start restarts the hotspot.
+        if (!start_portal()) return false;
     }
     start_setup_http();
     if (xTaskCreate(wifi_join_watchdog, "wifi_join", 4096, nullptr, 3, nullptr) != pdPASS) {
@@ -491,8 +582,6 @@ bool ensure_network_stack()
 
     if (g_saved_ssid[0]) {
         set_status("Connecting to saved Wi-Fi...");
-    } else {
-        start_portal();
     }
     return true;
 }

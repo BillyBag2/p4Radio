@@ -20,6 +20,7 @@ void board_init()
 }
 
 esp_codec_dev_handle_t board_speaker_init() { return bsp_audio_codec_speaker_init(); }
+bool board_speaker_is_mono() { return false; }
 bool board_display_start() { return bsp_display_start() != nullptr; }
 esp_err_t board_sdcard_mount()
 {

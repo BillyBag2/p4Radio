@@ -59,6 +59,7 @@ bool valid_max_bitrate(int kbps);
 int stream_url_bitrate(const std::string &url);
 extern std::atomic<int> g_max_bitrate_kbps;
 extern std::atomic<int> g_volume;
+#if !P4RADIO_HEADLESS
 extern std::atomic<bool> g_show_volume_bar;
 extern std::atomic<bool> g_show_buffer_bar;
 extern std::atomic<bool> g_show_power_meter;
@@ -73,6 +74,7 @@ inline constexpr std::array<DisplaySkinOption, 3> kDisplaySkins{{
 bool valid_display_skin(DisplaySkinId skin);
 const char *display_skin_name(DisplaySkinId skin);
 extern std::atomic<DisplaySkinId> g_display_skin;
+#endif
 extern std::atomic<bool> g_connected;
 extern std::atomic<bool> g_internet_probe_pending;
 extern std::atomic<bool> g_portal_active;
@@ -83,7 +85,9 @@ extern std::atomic<bool> g_idle_ready;
 extern std::atomic<bool> g_resume_requested;
 extern std::atomic<bool> g_scan_requested;
 extern esp_codec_dev_handle_t g_speaker;
+#if !P4RADIO_HEADLESS
 extern std::atomic<int> g_ap_clients;
+#endif
 extern char g_hostname[33];
 extern std::atomic<int> g_stream_kbps;
 extern std::atomic<int> g_buffer_percent;
@@ -107,8 +111,17 @@ std::string status_copy();
 std::string hostname_copy();
 bool valid_hostname(const std::string &name);
 void save_preferences();
-esp_err_t save_web_settings(const std::string &hostname, bool volume_bar, bool buffer_bar, int max_bitrate,
-                            bool power_meter, DisplaySkinId skin);
+struct WebSettings {
+    std::string hostname;
+    int max_bitrate = 0;
+#if !P4RADIO_HEADLESS
+    bool volume_bar = false;
+    bool buffer_bar = false;
+    bool power_meter = false;
+    DisplaySkinId skin = DisplaySkinId::Square;
+#endif
+};
+esp_err_t save_web_settings(const WebSettings &settings);
 void load_preferences();
 void save_wifi_credentials(const char *ssid, const char *password);
 bool ensure_network_stack();
@@ -127,6 +140,8 @@ bool extract_aac_from_mpeg_ts(const uint8_t *transport_stream, size_t transport_
 bool test_internet_connection();
 void initialize_audio();
 void playback_task(void *argument);
+#if !P4RADIO_HEADLESS
 void build_ui();
+#endif
 
 } // namespace p4radio

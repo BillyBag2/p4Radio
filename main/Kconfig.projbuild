@@ -2,6 +2,7 @@ menu "p4Radio"
 
     choice P4RADIO_DISPLAY_SKIN
         prompt "Default display skin"
+        depends on LV_USE_DRAW_SW
         default P4RADIO_SKIN_SQUARE
         help
             Initial layout when no skin preference is saved in NVS. All skins

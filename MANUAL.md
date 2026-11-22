@@ -18,7 +18,7 @@ A new QR code will be displayed.
 
 The p4radio will scan for available WiFi networks.
 
-* Select your WiFi network from the list and enter the password.
+* Enter your Wi-Fi network name and password, or use **Scan for networks** to find the name.
 
 The p4radio will connect to your WiFi.
 

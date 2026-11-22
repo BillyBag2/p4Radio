@@ -32,7 +32,9 @@ extern "C" void app_main(void)
     board_init();
     initialize_audio();
     initialize_button_audio();
+#if !P4RADIO_HEADLESS
     build_ui();
+#endif
     const bool network_ready = ensure_network_stack();
     if (!network_ready) {
 #if P4RADIO_WIFI_HOSTED

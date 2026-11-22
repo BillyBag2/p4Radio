@@ -11,17 +11,40 @@ dependencies:
     rules:
       - if: "$MY_BOARD == tab5"
   espressif/esp_wifi_remote:
-    version: "1.6.3"
+    version: "1.6.4"
     rules:
       - if: "target == esp32p4"
   espressif/esp_hosted:
-    version: "2.12.11"
+    version: "3.1.0"
     rules:
       - if: "target == esp32p4"
   espressif/esp_lvgl_port:
     version: "2.9.0"
+    matches:
+      - if: "target == esp32s3"
+      - if: "$MY_BOARD == jc_esp32p4_m3_dev"
     rules:
-      - if: "$MY_BOARD == waveshare185c"
+      - if: "$P4RADIO_HEADLESS == OFF"
+  waveshare/esp_lcd_jd9365_10_1:
+    version: "2.0.0"
+    rules:
+      - if: "$MY_BOARD == jc_esp32p4_m3_dev"
+      - if: "$P4RADIO_HEADLESS == OFF"
+  espressif/esp_lcd_st7701:
+    version: "2.0.3"
+    rules:
+      - if: "$MY_BOARD == esp32_4848s040"
+  espressif/esp_lcd_panel_io_additions:
+    version: "1.0.1~1"
+    rules:
+      - if: "$MY_BOARD == esp32_4848s040"
+  espressif/esp_lcd_touch_gt911:
+    version: "1.2.1"
+    matches:
+      - if: "$MY_BOARD == esp32_4848s040"
+      - if: "$MY_BOARD == jc_esp32p4_m3_dev"
+    rules:
+      - if: "$P4RADIO_HEADLESS == OFF"
   espressif/esp_lcd_st77916:
     version: "2.0.2"
     rules:
@@ -34,4 +57,6 @@ dependencies:
     version: "1.5.4"
   lvgl/lvgl:
     version: "9.3.0"
+    rules:
+      - if: "$P4RADIO_HEADLESS == OFF"
   espressif/esp_audio_codec: "2.4.0"
