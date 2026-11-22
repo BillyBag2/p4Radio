@@ -1,0 +1,20 @@
+# Fonts referenced by the radio UI.
+CONFIG_LV_FONT_MONTSERRAT_8=y
+CONFIG_LV_FONT_MONTSERRAT_12=y
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_24=y
+CONFIG_LV_FONT_MONTSERRAT_40=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# LVGL sizes its TLSF block limit from the base heap plus this allowance.
+# Permit the shared Circular/Retro 3 MB PSRAM drawing pool.
+CONFIG_LV_MEM_POOL_EXPAND_SIZE_KILOBYTES=3072
+
+# Initial display layout; web settings save the user's choice in NVS.
+CONFIG_P4RADIO_SKIN_SQUARE=y
+
+CONFIG_LV_USE_QRCODE=y
+CONFIG_LV_USE_CANVAS=y
+CONFIG_LV_USE_SNAPSHOT=y

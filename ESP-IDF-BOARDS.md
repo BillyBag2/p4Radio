@@ -26,6 +26,7 @@ Start with the following board definitions:
 | --- | --- |
 | `tab5` | `esp32p4` |
 | `waveshare86` | `esp32p4` |
+| `jc_esp32p4_m3_dev` | `esp32p4` |
 | `jc8012` | `esp32p4` |
 | `esp32s3` | `esp32s3` |
 | `waveshare185c` | `esp32s3` |
@@ -34,16 +35,22 @@ Start with the following board definitions:
 
 Additional boards must be added to the central board list, CMake presets and board-specific source directories.
 
-In p4Radio, `waveshare86`, `tab5`, `waveshare185c` and `esp32_4848s040` are implemented.
-The two S3 ports require `esp32s3`: Waveshare 1.85C V2 and GUITION 4848S040
-with NS4168 speaker wiring (not the relay variant). The GUITION port uses
-`sdkconfig.esp32_4848s040`, `partitions.esp32_4848s040.csv` and
-`dependencies.esp32_4848s040.lock`; its hardware verification is pending. The remaining entries above
-describe planned ports, not selectable configurations. TAB5 uses its own managed
-BSP, SDK defaults, 16 MB partition table and `dependencies.tab5.lock`; Waveshare
-retains `dependencies.lock`. S3 dependency versions are pinned in
-`dependencies.waveshare185c.lock`. A generated `build/active-board` marker makes the
-other cached build reconfigure on its next use after dependencies change boards.
+In p4Radio, `waveshare86`, `tab5`, `jc_esp32p4_m3_dev`, `waveshare185c` and
+`esp32_4848s040` are implemented.
+The two S3 ports require `esp32s3` and target the Waveshare 1.85C V2 and the
+GUITION 4848S040 with NS4168 speaker wiring. Their locks are
+`dependencies.waveshare185c.lock` and `dependencies.esp32_4848s040.lock`.
+TAB5 uses a managed BSP and `dependencies.tab5.lock`. Waveshare 86 uses
+`dependencies.lock`. The JC-ESP32P4-M3-DEV has its own 16 MB partition table,
+SDK defaults and `dependencies.jc_esp32p4_m3_dev.lock`. Its `P4RADIO_HEADLESS`
+CMake option defaults to `ON` and leaves the display components out of the
+build. With the option `OFF`, it uses `dependencies.jc_esp32p4_m3_dev.display.lock`
+and the external Waveshare 10.1-DSI-TOUCH-A from the GUITION display demo.
+Display builds load `sdkconfig.display.defaults` before the board defaults.
+The `jc8012`, `esp32s3` and `linux` rows describe planned ports.
+
+A generated `build/active-board` marker makes other cached builds reconfigure
+on their next use after dependencies change boards.
 Build boards sequentially in a checkout because `managed_components/` is shared.
 
 ## 2. Project Structure

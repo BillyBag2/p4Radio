@@ -1,7 +1,8 @@
 # p4Radio
 
 An internet radio for Waveshare ESP32-P4-86-Panel-ETH-2RO, M5Stack TAB5,
-Waveshare ESP32-S3-Touch-LCD-1.85C V2 and GUITION ESP32-4848S040 (speaker variant).
+Waveshare ESP32-S3-Touch-LCD-1.85C V2, GUITION ESP32-4848S040 (speaker variant)
+and GUITION JC-ESP32P4-M3-DEV.
 
 The strategy for supporting additional hardware is documented in
 [ESP-IDF-BOARDS.md](ESP-IDF-BOARDS.md), covering board selection, chip compatibility,
@@ -11,16 +12,16 @@ For operation see: [MANUAL.md](MANUAL.md).
 
 ## Web pages and screenshots
 
-Open `http://p4radio.local/` (or your saved hostname) and use the Radio,
-Stations, Wi-Fi and Advanced tabs. On **Advanced**, select **Save screenshot
+Open `http://p4radio.local/` (or your saved hostname) for the Radio,
+Stations and Wi-Fi tabs. Display builds also include **Advanced**, where you can select **Save screenshot
 to SD card** to capture the radio display as a BMP image. Insert a FAT-formatted
 microSD card first; each capture gets a unique filename under `/screens/` on
 the card. Wait for the saved message before removing the card. The firmware
 unmounts the card after each capture and never formats it on mount failure.
 An OFF display is captured as its current black screen without waking the radio.
 
-Screenshot support requires `CONFIG_LV_USE_SNAPSHOT=y` (included in common
-defaults); enable it in an existing SDK configuration as well. On Waveshare 86,
+Screenshot support requires `CONFIG_LV_USE_SNAPSHOT=y` (included in
+`sdkconfig.display.defaults`); enable it in an existing display SDK configuration as well. On Waveshare 86,
 leave `CONFIG_BSP_SD_FORMAT_ON_MOUNT_FAIL` disabled; screenshot mounting refuses
 that destructive recovery setting. The capture uses a temporary RGB565 PSRAM
 buffer (about 253 KB on 1.85C, 1013 KB on Waveshare 86, or 1800 KB on TAB5).
@@ -76,17 +77,17 @@ these do not verify LVGL rendering, SD writes or hardware behaviour.
 
 | Component | ESP32-P4-86-Panel-ETH-2RO | M5Stack TAB5 | Waveshare ESP32-S3-Touch-LCD-1.85C V2 | GUITION JC-ESP32P4-M3-DEV | ESP32-4848S040 |
 | --- | --- | --- | --- | --- | --- |
-| Project configuration | `waveshare86` | `tab5` | `waveshare185c` (`esp32s3`) | Not implemented | `esp32_4848s040` (`esp32s3`, speaker variant; hardware verification pending) |
+| Project configuration | `waveshare86` | `tab5` | `waveshare185c` (`esp32s3`) | `jc_esp32p4_m3_dev` (`esp32p4`, headless by default) | `esp32_4848s040` (`esp32s3`, speaker variant; hardware verification pending) |
 | Main processor | ESP32-P4NRW32, dual-core 32-bit RISC-V high-performance CPU up to 360 MHz, plus a low-power RISC-V core up to 40 MHz | ESP32-P4NRW32; dual-core RISC-V HP CPU at 360 MHz, LP core up to 40 MHz | ESP32-S3R8; dual-core Xtensa LX7, up to 240 MHz | ESP32-P4; dual-core RISC-V, 360 MHz (up to 400 MHz advertised) | ESP32-S3R8; dual-core, 240 MHz |
-| Chip / board revision | ESP32-P4 revision 1.3. Target pre-v3 silicon branch. | Firmware targets pre-v3 silicon; individual board revision not verified | Board V2 / Rev2.0; S3 silicon revision not verified | Not specified; silicon revision needs verification | Connected device reports ESP32-S3 revision v0.2; board revision not verified |
+| Chip / board revision | ESP32-P4 revision 1.3. Target pre-v3 silicon branch. | Firmware targets pre-v3 silicon; individual board revision not verified | Board V2 / Rev2.0; S3 silicon revision not verified | Firmware targets pre-v3 silicon per vendor demo | Connected device reports ESP32-S3 revision v0.2; board revision not verified |
 | PSRAM | 32 MB up to 200 MHz | 32 MB; firmware configured for HEX mode at 200 MHz | 8 MB octal PSRAM, configured at 80 MHz | 32 MB in chip package | 8 MB |
 | Flash | 32 MB external SPI NOR flash | 16 MB SPI NOR flash | 16 MB SPI NOR flash | 16 MB NOR flash | 16 MB |
-| Display | 4-inch IPS, 720 x 720 pixels, 2-lane MIPI DSI; ST7703 driver; backlight enable GPIO33, PWM GPIO26, reset GPIO27 | 5-inch IPS, 1280 x 720 landscape; MIPI DSI; ILI9881C or ST7123/ST7121 depending on hardware revision; backlight GPIO22 | 1.85-inch round, 360 x 360; ST77916 over QSPI; backlight GPIO5 | MIPI-DSI and SPI interfaces; maximum advertised resolution 800 x 1280; attached panel not specified | 4-inch IPS TFT, 480 x 480 pixels; ST7701 driver; 16-bit RGB (65K colours); IPS full viewing angle |
-| Touch | GT911 five-point capacitive touch controller over I2C; SDA GPIO7, SCL GPIO8, reset GPIO23; interrupt is routed to a test point | Capacitive; GT911 or integrated ST7123/ST7121; I2C SDA GPIO31, SCL GPIO32, interrupt GPIO23 | CST816 capacitive touch; I2C SDA GPIO11, SCL GPIO10; interrupt GPIO4; reset via TCA9554 | Not specified | GT911 capacitive; I2C SDA GPIO19, SCL GPIO45; RESET/INT not connected; polled |
-| Wi-Fi and Bluetooth | ESP32-C6-MINI-1U-H8 coprocessor connected over SDIO; Wi-Fi 6 (2.4 GHz) and Bluetooth 5 LE. Wireless support is provided by the C6, not the P4. | ESP32-C6-MINI-1U over SDIO; 2.4 GHz Wi-Fi 6 and Bluetooth LE | Native ESP32-S3 2.4 GHz Wi-Fi (802.11 b/g/n) and Bluetooth 5 LE; no coprocessor | ESP32-C6 coprocessor; Wi-Fi 6 and Bluetooth 5.0 advertised; host connection not specified | Native ESP32-S3 2.4 GHz Wi-Fi and Bluetooth LE; no coprocessor |
-| Ethernet | IP101 10/100 Mbit/s Ethernet PHY; RJ45 is on the 86 Panel bottom board | No onboard Ethernet | None onboard | Not specified | Not specified |
-| Audio | ES8311 audio codec, ES7210 microphone ADC, onboard microphone and 8 ohm / 2 W speaker output | ES8388 codec, ES7210 dual-microphone front end; 8 ohm / 1 W speaker; 3.5 mm headphone jack | V2: ES8311 codec, ES7210 ADC, dual microphones, NS4150B amplifier; BOX speaker rated 4 ohm / 5 W | I2S interface; codec, amplifier and speaker not specified | NS4168 I2S speaker amplifier; BCLK GPIO1, LRCLK GPIO2, data GPIO40; software volume; single speaker connector |
-| Storage expansion | TF/microSD slot | microSD slot | TF/microSD slot | SDIO 3.0 interface; card slot not specified | microSD over SPI: SCK GPIO48, MOSI GPIO47, MISO GPIO41, CS GPIO42; shares LCD initialization pins |
+| Display | 4-inch IPS, 720 x 720 pixels, 2-lane MIPI DSI; ST7703 driver; backlight enable GPIO33, PWM GPIO26, reset GPIO27 | 5-inch IPS, 1280 x 720 landscape; MIPI DSI; ILI9881C or ST7123/ST7121 depending on hardware revision; backlight GPIO22 | 1.85-inch round, 360 x 360; ST77916 over QSPI; backlight GPIO5 | External Waveshare 10.1-DSI-TOUCH-A profile; JD9365, 1280 x 800 landscape, I2C backlight | 4-inch IPS TFT, 480 x 480 pixels; ST7701 driver; 16-bit RGB (65K colours); IPS full viewing angle |
+| Touch | GT911 five-point capacitive touch controller over I2C; SDA GPIO7, SCL GPIO8, reset GPIO23; interrupt is routed to a test point | Capacitive; GT911 or integrated ST7123/ST7121; I2C SDA GPIO31, SCL GPIO32, interrupt GPIO23 | CST816 capacitive touch; I2C SDA GPIO11, SCL GPIO10; interrupt GPIO4; reset via TCA9554 | Polled GT911 on the external panel; SDA GPIO7, SCL GPIO8 | GT911 capacitive; I2C SDA GPIO19, SCL GPIO45; RESET/INT not connected; polled |
+| Wi-Fi and Bluetooth | ESP32-C6-MINI-1U-H8 coprocessor connected over SDIO; Wi-Fi 6 (2.4 GHz) and Bluetooth 5 LE. Wireless support is provided by the C6, not the P4. | ESP32-C6-MINI-1U over SDIO; 2.4 GHz Wi-Fi 6 and Bluetooth LE | Native ESP32-S3 2.4 GHz Wi-Fi (802.11 b/g/n) and Bluetooth 5 LE; no coprocessor | ESP32-C6 over SDIO slot 1; Wi-Fi 6 (2.4 GHz) and Bluetooth LE | Native ESP32-S3 2.4 GHz Wi-Fi and Bluetooth LE; no coprocessor |
+| Ethernet | IP101 10/100 Mbit/s Ethernet PHY; RJ45 is on the 86 Panel bottom board | No onboard Ethernet | None onboard | IP101 10/100 Mbit/s Ethernet PHY | Not specified |
+| Audio | ES8311 audio codec, ES7210 microphone ADC, onboard microphone and 8 ohm / 2 W speaker output | ES8388 codec, ES7210 dual-microphone front end; 8 ohm / 1 W speaker; 3.5 mm headphone jack | V2: ES8311 codec, ES7210 ADC, dual microphones, NS4150B amplifier; BOX speaker rated 4 ohm / 5 W | ES8311 codec, NS4150 speaker amplifier, PA enable GPIO11 | NS4168 I2S speaker amplifier; BCLK GPIO1, LRCLK GPIO2, data GPIO40; software volume; single speaker connector |
+| Storage expansion | TF/microSD slot | microSD slot | TF/microSD slot | microSD on SDMMC slot 0, powered by LDO 4 | microSD over SPI: SCK GPIO48, MOSI GPIO47, MISO GPIO41, CS GPIO42; shares LCD initialization pins |
 | USB | USB 2.0 High-Speed OTG and separate USB-to-UART interface | USB-A host and USB-C OTG | USB-C native USB 2.0 Full Speed | USB 2.0 High-Speed OTG | USB-to-UART (connected unit reports CH340); native USB pins used by touch/RGB |
 | RS485 | Interface on the ETH-2RO bottom board | SIT3088; switchable 120-ohm termination | None onboard | Not specified | Not specified |
 | Relays | Two isolated relay outputs on the ETH-2RO bottom board | None onboard | None onboard | Not specified | Other variants route GPIO1/2/40 to relays; this port requires the speaker wiring |
@@ -107,14 +108,38 @@ and this firmware still require verification on the particular hardware revision
 Listed peripherals describe the hardware; p4Radio does not currently use every
 peripheral.
 
-The GUITION M Series JC-ESP32P4-M3-DEV is included for hardware reference;
-p4Radio does not yet have a board port or build configuration for it. Its entries
-above use the supplied specifications and have not been independently verified.
-Those specifications also list a 92 x 62 mm module, an operating range of
--20 to +70 degrees C, 128 KB HP ROM, 16 KB LP ROM, 768 KB HP L2MEM,
-32 KB LP SRAM and 8 KB TCM, plus H.264 hardware encoding, digital signatures
-and a dedicated key management unit. Display, touch, audio wiring and the C6
-host connection need confirmation before implementing a port.
+### JC-ESP32P4-M3-DEV build and verification
+
+Select chip `esp32p4` and project configuration `jc_esp32p4_m3_dev` in the
+ESP-IDF extension. With ESP-IDF 6.1 initialized and `esp32p4` selected, build with
+
+```sh
+idf.py --preset jc_esp32p4_m3_dev -D SDKCONFIG=build/jc_esp32p4_m3_dev/sdkconfig build
+```
+
+The preset defaults to `P4RADIO_HEADLESS=ON`. It builds the ES8311 speaker
+output, C6 Wi-Fi, and the Radio, Stations and Wi-Fi web pages. With the bare
+carrier and a speaker connected, join the open `p4Radio-Setup` network
+with no password. If the client reports no internet access, choose to stay
+connected. Open `http://192.168.4.1/wifi` in a browser and enter your Wi-Fi
+network name and password. **Scan for networks** can fill in the network name.
+After the radio joins your home network, reconnect your client
+to that network and open `http://p4radio.local/` or the hostname you saved.
+
+For a carrier fitted with a Waveshare 10.1-DSI-TOUCH-A, pass
+`-D P4RADIO_HEADLESS=OFF` before `build` to enable the JD9365 panel, polled
+GT911 touch, skins and SD screenshots. The option persists in the CMake cache.
+Pass `-D P4RADIO_HEADLESS=ON` to switch back to headless. The display mode uses
+its own dependency lock and centers the skins in an 800 x 800 area.
+
+Hardware references are the [GUITION development board specification](https://www.guition.com/esp32p4-display-module/esp32p4-display-module),
+[schematic](https://github.com/DRubioG/JC-ESP32P4-M3-DEV/blob/main/5-Schematic/schematic.pdf)
+and [ESP-IDF demos](https://github.com/DRubioG/JC-ESP32P4-M3-DEV/tree/main/1-Demo/IDF-DEMO).
+
+On hardware, check Wi-Fi setup, wrong-password AP fallback, and uninterrupted
+MP3/AAC and BBC HLS playback. With the optional panel, also check colours,
+touch alignment, all three skins, OFF/tap wake, volume and button feedback,
+and repeated microSD screenshots during playback.
 
 The ESP32-4848S040 port targets the speaker variant with the NS4168 amplifier,
 480 x 480 ST7701 RGB panel and GT911 touch. Hardware pin assignments come from
@@ -298,19 +323,24 @@ TAB5 uses the [Espressif TAB5 BSP](https://components.espressif.com/components/e
 for its display, touch, ES8388 speaker and Wi-Fi power control. Its defaults use
 16 MB flash, 32 MB HEX PSRAM and pre-v3 ESP32-P4 silicon at 360 MHz. Its separate
 partition table retains the 8 MB app slot and fits storage into 16 MB. The C6
-SDIO connection uses CLK 12, CMD 13, D0-D3 11/10/9/8 and active-high reset 15,
+SDIO connection uses CLK 12, CMD 13, D0-D3 11/10/9/8 and C6 EN on GPIO15,
 following the [M5Stack pin map](https://docs.m5stack.com/en/core/Tab5).
-The C6 must have firmware compatible with ESP-Hosted 2.12.11; this project does
-not flash or update that coprocessor automatically.
+The P4 host uses ESP-Hosted 3.1.0. Espressif documents compatibility with 2.x
+MCU coprocessor firmware and recommends upgrading both sides to 3.x. Upgrade
+the P4 host before putting 3.x firmware on the C6. [MCU host compatibility table](https://github.com/espressif/esp-hosted-mcu/blob/v3.1.0/docs/migration.md#compatibility)
 
-ESP-Hosted's TAB5 reset setting must be **Active High**: its reset sequence ends
-with GPIO15 (C6 EN) high, releasing the C6. Selecting Active Low leaves it low,
-causing `sdmmc_init_ocr` timeouts (`0x107`). See the
-[TAB5 reset-polarity report](https://github.com/m5stack/M5Tab5-UserDemo/issues/1).
-For an existing build, search for `ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH` in
-`idf.py --preset tab5 menuconfig` and select **RESET: Active High**, then rebuild.
-Defaults do not override an existing `sdkconfig`; the TAB5 build rejects the
-incorrect setting so an old configuration cannot silently retain it.
+To build matching C6 firmware and an OTA updater, create these projects in a
+separate working directory. Configure the updater for `esp32p4` with the TAB5
+SDIO wiring above, and the coprocessor project for `esp32c6` with SDIO.
+
+```sh
+idf.py create-project-from-example "espressif/esp_hosted=3.1.0:ota/coprocessor_ota/mcu_host"
+idf.py create-project-from-example "espressif/esp_hosted=3.1.0:ota/coprocessor_ota/cp"
+```
+
+ESP-Hosted 3.1.0 pulses C6 EN low and releases it high. For an existing TAB5
+build, verify `ESP_HOSTED_HOST_RESET_GPIO=15` and the SDIO pin mapping in
+`idf.py --preset tab5 menuconfig` before rebuilding.
 
 TAB5 starts in landscape (1280 x 720). Every skin fits the shorter display edge
 and stays centered: Square and Retro stay square, and Circular stays circular

@@ -10,8 +10,8 @@
 #ifndef CONFIG_IDF_TARGET_ESP32P4
 #error "M5Stack TAB5 requires ESP32-P4"
 #endif
-#if !CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH
-#error "TAB5 requires CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y; update the existing sdkconfig in menuconfig"
+#if !CONFIG_ESP_HOSTED_HOST_TRANSPORT_BUS_SDIO || CONFIG_ESP_HOSTED_HOST_RESET_GPIO != 15
+#error "TAB5 requires ESP-Hosted SDIO with C6 EN on GPIO15; update its sdkconfig"
 #endif
 
 namespace p4radio {

@@ -48,6 +48,7 @@ bool valid_max_bitrate(int kbps)
     return std::find(kStandardBitrates.begin(), kStandardBitrates.end(), kbps) != kStandardBitrates.end();
 }
 
+#if !P4RADIO_HEADLESS
 bool valid_display_skin(DisplaySkinId skin)
 {
     return std::any_of(kDisplaySkins.begin(), kDisplaySkins.end(),
@@ -59,6 +60,7 @@ const char *display_skin_name(DisplaySkinId skin)
     for (const auto &option : kDisplaySkins) if (option.id == skin) return option.name;
     return "Unknown";
 }
+#endif
 
 void save_preferences()
 {
@@ -92,6 +94,7 @@ void load_preferences()
     int32_t max_bitrate = 0;
     if (nvs_get_i32(nvs, "max_bitrate", &max_bitrate) == ESP_OK && valid_max_bitrate(max_bitrate))
         g_max_bitrate_kbps.store(max_bitrate);
+#if !P4RADIO_HEADLESS
     uint8_t display_flags = 0;
     if (nvs_get_u8(nvs, "display_flags", &display_flags) == ESP_OK) {
         g_show_volume_bar.store((display_flags & 1) != 0);
@@ -101,6 +104,7 @@ void load_preferences()
     uint8_t skin = 0;
     if (nvs_get_u8(nvs, "skin", &skin) == ESP_OK && valid_display_skin(static_cast<DisplaySkinId>(skin)))
         g_display_skin.store(static_cast<DisplaySkinId>(skin));
+#endif
     size_t name_size = sizeof(g_hostname);
     char name[sizeof(g_hostname)] = {};
     if (nvs_get_str(nvs, "hostname", name, &name_size) == ESP_OK && valid_hostname(name))
@@ -112,30 +116,39 @@ void load_preferences()
     nvs_close(nvs);
 }
 
-esp_err_t save_web_settings(const std::string &hostname, bool volume_bar, bool buffer_bar, int max_bitrate,
-                            bool power_meter, DisplaySkinId skin)
+esp_err_t save_web_settings(const WebSettings &settings)
 {
-    if (!valid_hostname(hostname) || !valid_max_bitrate(max_bitrate) ||
-        !valid_display_skin(skin)) return ESP_ERR_INVALID_ARG;
+    if (!valid_hostname(settings.hostname) || !valid_max_bitrate(settings.max_bitrate)) return ESP_ERR_INVALID_ARG;
+#if !P4RADIO_HEADLESS
+    if (!valid_display_skin(settings.skin)) return ESP_ERR_INVALID_ARG;
+#endif
     nvs_handle_t handle;
     esp_err_t result = nvs_open("p4radio", NVS_READWRITE, &handle);
     if (result != ESP_OK) return result;
-    result = nvs_set_str(handle, "hostname", hostname.c_str());
-    if (result == ESP_OK) result = nvs_set_u8(handle, "display_flags", (volume_bar ? 1 : 0) | (buffer_bar ? 2 : 0) | (power_meter ? 4 : 0));
-    if (result == ESP_OK) result = nvs_set_i32(handle, "max_bitrate", max_bitrate);
-    if (result == ESP_OK) result = nvs_set_u8(handle, "skin", static_cast<uint8_t>(skin));
+    result = nvs_set_str(handle, "hostname", settings.hostname.c_str());
+    if (result == ESP_OK) result = nvs_set_i32(handle, "max_bitrate", settings.max_bitrate);
+#if !P4RADIO_HEADLESS
+    uint8_t display_flags = 0;
+    nvs_get_u8(handle, "display_flags", &display_flags);
+    display_flags = (display_flags & ~0x07u) | (settings.volume_bar ? 1 : 0) |
+        (settings.buffer_bar ? 2 : 0) | (settings.power_meter ? 4 : 0);
+    if (result == ESP_OK) result = nvs_set_u8(handle, "display_flags", display_flags);
+    if (result == ESP_OK) result = nvs_set_u8(handle, "skin", static_cast<uint8_t>(settings.skin));
+#endif
     if (result == ESP_OK) result = nvs_commit(handle);
     nvs_close(handle);
     if (result != ESP_OK) return result;
     portENTER_CRITICAL(&g_status_mux);
-    std::snprintf(g_hostname, sizeof(g_hostname), "%s", hostname.c_str());
+    std::snprintf(g_hostname, sizeof(g_hostname), "%s", settings.hostname.c_str());
     portEXIT_CRITICAL(&g_status_mux);
-    g_show_volume_bar.store(volume_bar);
-    g_show_buffer_bar.store(buffer_bar);
-    g_show_power_meter.store(power_meter);
-    g_display_skin.store(skin);
-    ESP_LOGI(kTag, "Saved display skin: %s", display_skin_name(skin));
-    if (g_max_bitrate_kbps.exchange(max_bitrate) != max_bitrate) g_scan_requested.store(true);
+#if !P4RADIO_HEADLESS
+    g_show_volume_bar.store(settings.volume_bar);
+    g_show_buffer_bar.store(settings.buffer_bar);
+    g_show_power_meter.store(settings.power_meter);
+    g_display_skin.store(settings.skin);
+    ESP_LOGI(kTag, "Saved display skin: %s", display_skin_name(settings.skin));
+#endif
+    if (g_max_bitrate_kbps.exchange(settings.max_bitrate) != settings.max_bitrate) g_scan_requested.store(true);
     return ESP_OK;
 }
 

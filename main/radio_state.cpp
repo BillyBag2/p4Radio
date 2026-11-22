@@ -6,6 +6,7 @@ std::atomic<int> g_station{0};
 std::atomic<uint32_t> g_station_token{0};
 std::atomic<int> g_volume{5};
 std::atomic<int> g_max_bitrate_kbps{0};
+#if !P4RADIO_HEADLESS
 std::atomic<bool> g_show_volume_bar{false};
 std::atomic<bool> g_show_buffer_bar{false};
 std::atomic<bool> g_show_power_meter{false};
@@ -15,6 +16,7 @@ std::atomic<DisplaySkinId> g_display_skin{DisplaySkinId::Retro};
 std::atomic<DisplaySkinId> g_display_skin{DisplaySkinId::Circular};
 #else
 std::atomic<DisplaySkinId> g_display_skin{DisplaySkinId::Square};
+#endif
 #endif
 std::atomic<bool> g_connected{false};
 std::atomic<bool> g_internet_probe_pending{false};
@@ -26,7 +28,9 @@ std::atomic<bool> g_idle_ready{false};
 std::atomic<bool> g_resume_requested{false};
 std::atomic<bool> g_scan_requested{false};
 esp_codec_dev_handle_t g_speaker = nullptr;
+#if !P4RADIO_HEADLESS
 std::atomic<int> g_ap_clients{0};
+#endif
 char g_hostname[33] = "p4radio";
 std::atomic<int> g_stream_kbps{0};
 std::atomic<int> g_stream_channels{0};

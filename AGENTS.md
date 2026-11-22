@@ -25,10 +25,9 @@ because this silicon revision does not support that peripheral.
 TAB5 uses the managed `espressif/m5stack_tab5` BSP for the landscape 1280 x 720
 display/touch, ES8388 speaker and C6 power control. Keep its 16 MB flash partition
 table and SDIO pin mapping in `sdkconfig.tab5` separate from Waveshare defaults.
-TAB5 requires `CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y`: ESP-Hosted's reset
-sequence finishes at the active level, which must leave C6 EN/GPIO15 high.
-Do not copy the old vendor demo's active-low setting; it holds C6 in reset with
-current ESP-Hosted. Update existing active SDK configuration as well as defaults.
+TAB5 requires `CONFIG_ESP_HOSTED_HOST_RESET_GPIO=15`. ESP-Hosted 3.1.0
+pulses C6 EN low and releases it high. Preserve the GPIO and SDIO pin mapping
+in defaults and existing active SDK configuration.
 Dependency locks are `dependencies.lock` (Waveshare 86), `dependencies.tab5.lock`
 `dependencies.waveshare185c.lock` and `dependencies.esp32_4848s040.lock`.
 The generated `build/active-board` marker triggers reconfiguration when switching

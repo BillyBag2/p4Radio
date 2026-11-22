@@ -3,7 +3,6 @@
 #include <cstdint>
 #include "esp_err.h"
 #include "esp_codec_dev.h"
-#include "lvgl.h"
 
 namespace p4radio {
 
@@ -13,6 +12,7 @@ void board_init();
 esp_codec_dev_handle_t board_speaker_init();
 // Downmix before buffering on boards with a single mono amplifier.
 bool board_speaker_is_mono();
+#if !P4RADIO_HEADLESS
 bool board_display_start();
 bool board_display_is_round();
 // Only the screenshot worker mounts/unmounts storage. Never format on failure.
@@ -23,5 +23,6 @@ bool board_display_lock(int32_t timeout_ms);
 void board_display_unlock();
 esp_err_t board_display_brightness_set(int percent);
 esp_err_t board_display_backlight_off();
+#endif
 
 } // namespace p4radio

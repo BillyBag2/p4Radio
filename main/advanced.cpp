@@ -1,5 +1,6 @@
 #include "advanced.hpp"
 #include "board.h"
+#include "lvgl.h"
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -16,7 +17,6 @@
 
 extern const char advanced_html[] asm("_binary_advanced_html_start");
 extern const char advanced_js[] asm("_binary_advanced_js_start");
-extern const char navigation_css[] asm("_binary_navigation_css_start");
 
 namespace p4radio {
 namespace {
@@ -202,8 +202,7 @@ esp_err_t start(httpd_req_t *request)
 esp_err_t asset(httpd_req_t *request)
 {
     const char *data = static_cast<const char *>(request->user_ctx);
-    httpd_resp_set_type(request, data == advanced_js ? "text/javascript; charset=utf-8" :
-        data == navigation_css ? "text/css; charset=utf-8" : "text/html; charset=utf-8");
+    httpd_resp_set_type(request, data == advanced_js ? "text/javascript; charset=utf-8" : "text/html; charset=utf-8");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     return httpd_resp_send(request, data, HTTPD_RESP_USE_STRLEN);
 }
@@ -214,7 +213,6 @@ void register_advanced_http(httpd_handle_t server)
     const httpd_uri_t routes[] = {
         {.uri = "/advanced", .method = HTTP_GET, .handler = asset, .user_ctx = const_cast<char *>(advanced_html)},
         {.uri = "/advanced.js", .method = HTTP_GET, .handler = asset, .user_ctx = const_cast<char *>(advanced_js)},
-        {.uri = "/navigation.css", .method = HTTP_GET, .handler = asset, .user_ctx = const_cast<char *>(navigation_css)},
         {.uri = "/api/screenshot", .method = HTTP_GET, .handler = status, .user_ctx = nullptr},
         {.uri = "/api/screenshot", .method = HTTP_POST, .handler = start, .user_ctx = nullptr},
     };

@@ -33,6 +33,20 @@
       }
     },
     {
+      "name": "jc_esp32p4_m3_dev",
+      "displayName": "GUITION JC-ESP32P4-M3-DEV",
+      "generator": "Ninja",
+      "binaryDir": "build/jc_esp32p4_m3_dev",
+      "environment": {
+        "MY_BOARD": "jc_esp32p4_m3_dev"
+      },
+      "cacheVariables": {
+        "SDKCONFIG": "build/jc_esp32p4_m3_dev/sdkconfig",
+        "SDKCONFIG_DEFAULTS": "sdkconfig.defaults;sdkconfig.jc_esp32p4_m3_dev",
+        "IDF_TARGET": "esp32p4"
+      }
+    },
+    {
       "name": "waveshare185c",
       "displayName": "Waveshare ESP32-S3-Touch-LCD-1.85C",
       "generator": "Ninja",
