@@ -64,58 +64,37 @@ void DisplaySkin::dismiss_setup_qr()
     lv_obj_add_flag(setup_screen_, LV_OBJ_FLAG_HIDDEN);
 }
 
+void DisplaySkin::sync_power()
+{
+    static bool backlight_off = false;
+    const bool off = g_sleep_requested.load() && !g_resume_requested.load();
+    if (wake_overlay_) {
+        if (off && lv_obj_has_flag(wake_overlay_, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_remove_flag(wake_overlay_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(wake_overlay_);
+        } else if (!off) {
+            lv_obj_add_flag(wake_overlay_, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    if (off != backlight_off) {
+        backlight_off = off;
+        const esp_err_t result = off ? board_display_backlight_off() : board_display_brightness_set(100);
+        if (result != ESP_OK) ESP_LOGE(kTag, "Backlight change failed: %s", esp_err_to_name(result));
+    }
+}
+
 void DisplaySkin::wake_on_tap()
 {
     if (!g_sleep_requested.load()) return;
-    // The full-screen overlay consumes this tap, so it cannot activate a control.
-    if (wake_overlay_) lv_obj_add_flag(wake_overlay_, LV_OBJ_FLAG_HIDDEN);
-    const esp_err_t result = board_display_brightness_set(100);
-    if (result != ESP_OK) ESP_LOGE(kTag, "Backlight restore failed: %s", esp_err_to_name(result));
-    request_button_sound();
-    g_resume_requested.store(true);
-    set_status("Resuming radio...");
+    // Consume the wake tap without activating an underlying control.
+    request_radio_action(Action::Resume);
+    sync_power();
 }
 
 void DisplaySkin::radio_button(Action action)
 {
-    request_button_sound();
-    switch (action) {
-    case Action::PreviousStation: // previous station
-        select_adjacent_station(-1);
-        g_playback_requested.store(true);
-        request_preferences_save();
-        break;
-    case Action::NextStation: // next station
-        select_adjacent_station(1);
-        g_playback_requested.store(true);
-        request_preferences_save();
-        break;
-    case Action::VolumeDown:
-        g_volume.store(std::max(kMinVolume, g_volume.load() - 1));
-        request_preferences_save();
-        break;
-    case Action::VolumeUp:
-        g_volume.store(std::min(kMaxVolume, g_volume.load() + 1));
-        request_preferences_save();
-        break;
-    case Action::Tune:
-        g_scan_requested.store(true);
-        set_status("Stopping stream for a fresh search");
-        break;
-    case Action::Off:
-        g_resume_requested.store(false);
-        g_idle_ready.store(false);
-        if (wake_overlay_) {
-            lv_obj_remove_flag(wake_overlay_, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(wake_overlay_);
-        }
-        if (board_display_backlight_off() != ESP_OK) ESP_LOGE(kTag, "Backlight off failed");
-        g_playback_requested.store(false);
-        g_sleep_requested.store(true);
-        break;
-    case Action::Count:
-        break;
-    }
+    request_radio_action(action);
+    if (action == Action::Off) sync_power();
 }
 
 lv_obj_t *DisplaySkin::add_button(const char *caption, int x, int y, int width, int height, Action action,
@@ -167,6 +146,7 @@ void set_background_if_changed(lv_obj_t *object, lv_color_t color, lv_part_t par
 
 void DisplaySkin::refresh()
 {
+    sync_power();
     const std::string hostname = hostname_copy();
     if (hostname_label_) set_label_if_changed(hostname_label_, ("http://" + hostname + ".local/").c_str());
     if (setup_title_) set_label_if_changed(setup_title_, hostname.c_str());

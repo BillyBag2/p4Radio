@@ -1,4 +1,5 @@
 #pragma once
+#include "radio_control.hpp"
 
 #include <array>
 #include <string>
@@ -34,7 +35,7 @@ protected:
     uint32_t buffer_color_ = 0x309cff;
     uint32_t buffer_low_color_ = 0xffa020;
 
-    enum class Action { PreviousStation, NextStation, VolumeDown, VolumeUp, Off, Tune, Count };
+    using Action = RadioAction;
     enum class CaptionAlignment { Center, Left, Right };
     lv_obj_t *add_button(const char *caption, int x, int y, int width, int height,
                          Action action, CaptionAlignment alignment = CaptionAlignment::Center);
@@ -71,6 +72,7 @@ private:
 
     void show_settings_qr();
     void dismiss_setup_qr();
+    void sync_power();
     void wake_on_tap();
     void radio_button(Action action);
     void constrain_touch(lv_obj_t *object);

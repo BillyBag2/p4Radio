@@ -21,13 +21,15 @@ if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/${BOARD_SOURCE}")
     message(FATAL_ERROR "Missing implementation for board '${MY_BOARD}'")
 endif()
 
+set(control_page "${CMAKE_CURRENT_BINARY_DIR}/control.html")
 set(stations_page "${CMAKE_CURRENT_BINARY_DIR}/stations.html")
 idf_component_register(SRCS "${BOARD_SOURCE}" ${BOARD_EXTRA_SOURCES} ${DISPLAY_SOURCES} "main.cpp" "radio_state.cpp" "settings.cpp" "network.cpp"
                          "streams.cpp" "stream_input.cpp" "radio_browser_dns.cpp" "station_catalog.cpp" "station_web.cpp"
-                         "playback.cpp" "button_audio.cpp"
+                         "playback.cpp" "button_audio.cpp" "radio_control.cpp"
                     INCLUDE_DIRS "."
-                    EMBED_TXTFILES "${stations_page}" "web/stations.js" "web/stations.css" "web/navigation.css" ${DISPLAY_ASSETS}
+                    EMBED_TXTFILES "${control_page}" "${stations_page}" "web/stations.js" "web/stations.css" "web/navigation.css" ${DISPLAY_ASSETS}
                     REQUIRES esp_wifi esp_event esp_netif lwip esp_http_server esp_http_client nvs_flash esp_timer mbedtls esp_codec_dev esp_audio_codec ${BOARD_REQUIRES})
+configure_file("web/control.html" "${control_page}" @ONLY)
 configure_file("web/stations.html" "${stations_page}" @ONLY)
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE ${MY_BOARD_DEFINE}=1 P4RADIO_WIFI_HOSTED=${BOARD_WIFI_HOSTED}

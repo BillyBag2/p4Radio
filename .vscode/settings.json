@@ -33,7 +33,7 @@
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
-    "--compile-commands-dir=c:\\repos\\p4Radio\\build\\esp32_4848s040"
+    "--compile-commands-dir=c:\\repos\\p4Radio\\build\\jc_esp32p4_m3_dev"
   ],
   "idf.flashType": "UART",
   "cSpell.words": [
